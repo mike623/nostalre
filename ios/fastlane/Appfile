@@ -1,3 +1,4 @@
 app_identifier("io.github.mikewong.nostalre")
 team_id("Z6KK7N4RQ4")
-apple_id(ENV["FASTLANE_USER"]) # only `setup` signs in with an Apple ID
+apple_id(ENV["FASTLANE_USER"] || "namike623@gmail.com") # Apple ID for setup/testers
+itc_team_name("Tze Kin Wong")

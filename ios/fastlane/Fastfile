@@ -17,6 +17,15 @@ def asc_key
   )
 end
 
+# fastlane 2.241's create_beta_group sends publicLinkLimitEnabled, which Apple rejects for internal groups
+def create_internal_group(app, name)
+  body = { data: { type: "betaGroups",
+                   attributes: { name: name, isInternalGroup: true, hasAccessToAllBuilds: true },
+                   relationships: { app: { data: { id: app.id, type: "apps" } } } } }
+  resp = Spaceship::ConnectAPI.client.test_flight_request_client.post("v1/betaGroups", body)
+  Array(Spaceship::ConnectAPI::Models.parse(resp.body)).first
+end
+
 platform :ios do
   lane :setup do
     produce(app_name: APP_NAME, sku: "nostalre", language: "English", app_version: "0.1.0")
@@ -46,6 +55,30 @@ platform :ios do
                            changelog: options[:changelog])
     end
     UI.success("Uploaded build #{build}; TestFlight lists it after Apple processes it (~5-15 min)")
+  end
+
+  # Once (Apple ID session): internal group that receives every build, with you in it; prints build status
+  lane :testers do |options|
+    email = options[:email] || CredentialsManager::AppfileConfig.try_fetch_value(:apple_id)
+    Spaceship::ConnectAPI.login(email, use_portal: false, use_tunes: true)
+    app = Spaceship::ConnectAPI::App.find(CredentialsManager::AppfileConfig.try_fetch_value(:app_identifier))
+    app.get_builds(sort: "-uploadedDate", limit: 5).each do |b|
+      UI.message("build #{b.version}: #{b.processing_state}")
+    end
+    group = app.get_beta_groups.find { |g| g.name == "Me" } ||
+            create_internal_group(app, "Me")
+    UI.message("group #{group.name} (internal: #{group.is_internal_group})")
+    user = Spaceship::ConnectAPI::User.find(email: email).first
+    UI.user_error!("#{email} is not an App Store Connect user") unless user
+    tester = Array(Spaceship::ConnectAPI::BetaTester.find(email: email)).first
+    if tester
+      members = Spaceship::ConnectAPI.get_beta_testers(filter: { betaGroups: group.id }).to_models.map(&:email)
+      UI.message("tester #{tester.email}: invite #{tester.invite_type}, state #{tester.beta_tester_state}; group members: #{members.inspect}")
+      Spaceship::ConnectAPI.post_beta_tester_assignment(beta_group_ids: [group.id], attributes: { email: email, firstName: user.first_name, lastName: user.last_name }) unless members.include?(email)
+    else
+      Spaceship::ConnectAPI::BetaTester.create(email: email, first_name: user.first_name, last_name: user.last_name, beta_group_ids: [group.id])
+    end
+    UI.success("#{email} is in group Me; accept the TestFlight invite email on the iPhone")
   end
 
   lane :status do
