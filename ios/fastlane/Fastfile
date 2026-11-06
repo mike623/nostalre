@@ -5,6 +5,7 @@
 # Auth for beta/status: an App Store Connect API key when ASC_KEY_ID + ASC_ISSUER_ID are set
 # (key file ~/private_keys/AuthKey_<id>.p8), otherwise the Apple ID signed in to Xcode uploads.
 default_platform(:ios)
+ENV["FASTLANE_ITC_TEAM_NAME"] ||= "Tze Kin Wong" # the Apple ID sees several App Store Connect teams
 
 APP_NAME = "nostalRE"
 
