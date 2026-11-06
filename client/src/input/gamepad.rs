@@ -7,7 +7,7 @@
 //! the arrow keys. While the HUD's menu is open, A, B, X, Y, L1 and R1 are its keys (`menu_press`).
 //!
 //! Buttons arrive as key events carrying the Android keycode; sticks, the D-pad hat and the triggers as
-//! DeviceEvent::Motion (vendor/winit). Android only for now.
+//! DeviceEvent::Motion (vendor/winit). On desktop gilrs is polled each frame and fed through the same paths.
 
 use std::collections::HashSet;
 use std::time::{Duration, Instant};
@@ -188,6 +188,9 @@ pub(crate) struct Gamepad {
     aim_candidates: Vec<(u32, (f32, f32))>,
     /// The party member (or the player) buffs aimed from the pad go to; kept across casts, cleared on a map change
     buff_lock: Option<u32>,
+    /// Desktop controllers; opened on the first frame
+    #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+    gilrs: Option<gilrs::Gilrs>,
 }
 
 impl Gamepad {
@@ -247,6 +250,84 @@ impl Gamepad {
                 self.set_held(Button::R2, v > 0.5);
             }
             _ => {}
+        }
+    }
+
+    /// Desktop: drain gilrs into the Android-shaped state the rest of this file reads.
+    #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+    fn poll_desktop(&mut self) {
+        use gilrs::{Axis as GA, Button as GB, EventType};
+        if self.gilrs.is_none() {
+            match gilrs::Gilrs::new() {
+                Ok(g) => {
+                    for (_, pad) in g.gamepads() {
+                        tracing::info!("controller: {}", pad.name());
+                    }
+                    self.gilrs = Some(g);
+                }
+                Err(e) => {
+                    tracing::warn!("controllers unavailable: {e}");
+                    return;
+                }
+            }
+        }
+        let mut events = Vec::new();
+        if let Some(g) = &mut self.gilrs {
+            while let Some(ev) = g.next_event() {
+                events.push(ev.event);
+            }
+        }
+        let button = |b: GB| {
+            Some(match b {
+                GB::South => Button::A,
+                GB::East => Button::B,
+                GB::West => Button::X,
+                GB::North => Button::Y,
+                GB::LeftTrigger => Button::L1,
+                GB::RightTrigger => Button::R1,
+                GB::LeftThumb => Button::L3,
+                GB::RightThumb => Button::R3,
+                GB::Start => Button::Start,
+                GB::Select => Button::Select,
+                GB::DPadUp => Button::Up,
+                GB::DPadDown => Button::Down,
+                GB::DPadLeft => Button::Left,
+                GB::DPadRight => Button::Right,
+                _ => return None,
+            })
+        };
+        for ev in events {
+            match ev {
+                // analog triggers: the axis path also holds L2/R2
+                EventType::ButtonChanged(GB::LeftTrigger2, v, _) => self.axis(axis::LTRIGGER, v as f64),
+                EventType::ButtonChanged(GB::RightTrigger2, v, _) => self.axis(axis::RTRIGGER, v as f64),
+                EventType::ButtonPressed(b, _) => {
+                    if let Some(b) = button(b) {
+                        self.press(b)
+                    }
+                }
+                EventType::ButtonReleased(b, _) => {
+                    if let Some(b) = button(b) {
+                        self.release(b)
+                    }
+                }
+                // gilrs sticks are y-up, Android's y-down
+                EventType::AxisChanged(a, v, _) => match a {
+                    GA::LeftStickX => self.axis(axis::X, v as f64),
+                    GA::LeftStickY => self.axis(axis::Y, -v as f64),
+                    GA::RightStickX => self.axis(axis::Z, v as f64),
+                    GA::RightStickY => self.axis(axis::RZ, -v as f64),
+                    _ => {}
+                },
+                EventType::Connected => tracing::info!("controller connected"),
+                EventType::Disconnected => {
+                    self.axes = [0.0; 24];
+                    for b in std::mem::take(&mut self.held) {
+                        self.released.push(b);
+                    }
+                }
+                _ => {}
+            }
         }
     }
 
@@ -326,6 +407,8 @@ impl Gamepad {
 impl App {
     /// Once per frame, before the UI is built: what the pad did since the last one.
     pub(crate) fn gamepad_frame(&mut self, event_loop: &ActiveEventLoop, window: WindowId) {
+        #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+        self.gamepad.poll_desktop();
         let now = Instant::now();
         let dt = self
             .gamepad

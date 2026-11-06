@@ -34,6 +34,10 @@ serde_json = { workspace = true }
 winit = { workspace = true }
 tokio = { workspace = true }
 
+# desktop controllers; Android gets them from vendor/winit
+[target.'cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))'.dependencies]
+gilrs = "0.11"
+
 [target.'cfg(target_os = "android")'.dependencies]
 winit = { workspace = true, features = ["android-native-activity"] }
 
