@@ -136,8 +136,9 @@ pub async fn network_loop(
     let mut tunnel: Option<tunnel::Tunnel> = None;
     let mut session = Session::new(packetver);
     let mut keepalive = KeepaliveMode::Off;
-    // A login server may close its socket right after accepting: the handoff to the char server, not an error.
-    let mut login_accepted = false;
+    // A server may close its socket right after pointing us at the next one
+    // (login -> char, char -> zone, zone -> zone): a handoff, not an error.
+    let mut handed_off = false;
     let mut keepalive_interval = time::interval(Duration::from_secs(10));
     keepalive_interval.reset();
     let mut keepalive_send_time_ms: u32 = 0;
@@ -201,8 +202,13 @@ pub async fn network_loop(
                                     info!("unhandled packet: {} (id={})", packet.name(), packet.id(session.packetver));
                                 }
                                 for event in events {
-                                    if matches!(event, GameEvent::LoginAccepted { .. }) {
-                                        login_accepted = true;
+                                    if matches!(
+                                        event,
+                                        GameEvent::LoginAccepted { .. }
+                                            | GameEvent::ZoneServerConnectInfo { .. }
+                                            | GameEvent::ZoneServerChanged { .. }
+                                    ) {
+                                        handed_off = true;
                                     }
                                     let event = match event {
                                         GameEvent::ServerTick { server_tick, .. } => {
@@ -220,7 +226,7 @@ pub async fn network_loop(
                         }
                         Err(ConnectionError::Disconnected) => {
                             info!("disconnected from server");
-                            if !std::mem::take(&mut login_accepted) {
+                            if !std::mem::take(&mut handed_off) {
                                 let _ = event_tx.send(GameEvent::Disconnected("connection closed".into()));
                             }
                             connection = None;
@@ -285,7 +291,7 @@ pub async fn network_loop(
                             match Connection::connect(&addr, expect_aid, tunnel.as_mut()).await {
                                 Ok(conn) => {
                                     info!("connected to {addr}");
-                                    login_accepted = false;
+                                    handed_off = false;
                                     connection = Some(conn);
                                 }
                                 Err(e) => {
@@ -316,7 +322,7 @@ pub async fn network_loop(
                     match Connection::connect(&addr, expect_aid, tunnel.as_mut()).await {
                         Ok(conn) => {
                             info!("connected to {addr}");
-                            login_accepted = false;
+                            handed_off = false;
                             connection = Some(conn);
                         }
                         Err(e) => {
