@@ -73,7 +73,11 @@ impl EffectLoader {
             .into_iter()
             .filter_map(nostalre_game::effect::str_names_of);
         queue.extend(common.map(Asset::Str));
-        queue.extend(all_strs.into_iter().map(Asset::Str));
+        // every STR at once is ~1.6 GB of GPU memory, past a 2 GB iPad's per-app limit: there the rest
+        // load when they first play
+        if !low_memory_device() {
+            queue.extend(all_strs.into_iter().map(Asset::Str));
+        }
         Self {
             queue,
             str_names,
@@ -102,6 +106,31 @@ impl EffectLoader {
             }
         }
     }
+}
+
+/// Under 3 GiB of RAM (or NOSTALRE_LOW_MEMORY=1 to try it elsewhere)
+fn low_memory_device() -> bool {
+    if std::env::var_os("NOSTALRE_LOW_MEMORY").is_some_and(|v| v == "1") {
+        return true;
+    }
+    physical_memory().is_some_and(|bytes| bytes < 3 << 30)
+}
+
+#[cfg(target_vendor = "apple")]
+fn physical_memory() -> Option<u64> {
+    unsafe extern "C" {
+        fn sysctlbyname(name: *const std::ffi::c_char, old: *mut std::ffi::c_void, oldlen: *mut usize, new: *mut std::ffi::c_void, newlen: usize) -> i32;
+    }
+    let mut bytes: u64 = 0;
+    let mut len = std::mem::size_of::<u64>();
+    let ok = unsafe { sysctlbyname(c"hw.memsize".as_ptr(), (&raw mut bytes).cast(), &mut len, std::ptr::null_mut(), 0) } == 0;
+    ok.then_some(bytes)
+}
+
+// ponytail: Apple only for now; Android/Linux could read /proc/meminfo if a small device needs it
+#[cfg(not(target_vendor = "apple"))]
+fn physical_memory() -> Option<u64> {
+    None
 }
 
 impl App {
