@@ -121,6 +121,7 @@ impl App {
             return;
         };
         if let Some(move_action) = try_move_to(gat, src_x, src_y, dest_x, dest_y) {
+            self.input.stop_walk_at = None;
             self.channel.send_packet(build_request_move_packet(
                 move_action.dest_x,
                 move_action.dest_y,

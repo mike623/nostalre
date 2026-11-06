@@ -1275,7 +1275,14 @@ impl ApplicationHandler for App {
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         let now = Instant::now();
         if now >= self.next_frame {
-            self.next_frame = now + FRAME_INTERVAL;
+            // Advance the deadline rather than restarting it from `now`: the frame that follows takes a few
+            // milliseconds to present, and `about_to_wait` runs after it, so scheduling from `now` added that
+            // time to every interval (a 60 fps cap that measured 48-51).
+            self.next_frame += FRAME_INTERVAL;
+            // one long frame (a texture upload, a map load) must not leave a queue of frames to catch up on
+            if self.next_frame <= now {
+                self.next_frame = now + FRAME_INTERVAL;
+            }
             if let Some(window) = &self.window {
                 window.request_redraw();
             }

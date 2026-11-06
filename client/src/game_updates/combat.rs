@@ -403,11 +403,14 @@ impl App {
             return;
         };
         match try_move_to(gat, px, py, item_x, item_y) {
-            Some(move_action) => self.channel.send_packet(build_request_move_packet(
-                move_action.dest_x,
-                move_action.dest_y,
-                self.active_packetver,
-            )),
+            Some(move_action) => {
+                self.input.stop_walk_at = None;
+                self.channel.send_packet(build_request_move_packet(
+                    move_action.dest_x,
+                    move_action.dest_y,
+                    self.active_packetver,
+                ));
+            }
             None => self.game.pending_casts.pending_pickup_item_id = None,
         }
     }

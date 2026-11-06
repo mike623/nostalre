@@ -609,6 +609,13 @@ impl App {
             .session
             .server_time
             .observe_server_tick(start_time, local_ms);
+        if self.input.stop_walk_at == Some((dest_x, dest_y)) {
+            self.input.stop_walk_at = None;
+            if let Some(entity) = self.game.world.entities.player_mut() {
+                entity.movement.correct_to_cell(dest_x as f32, dest_y as f32);
+            }
+            return;
+        }
         let latency_coupled = self.config.custom.latency_coupled_walk;
         if (latency_coupled || !already_moving_to_dest)
             && let Some(gat) = &self.game.session.gat
@@ -723,6 +730,27 @@ fn solo_slot(characters: impl IntoIterator<Item = (u32, i8)>, char_id: u32) -> O
 #[cfg(test)]
 mod solo_tests {
     use super::{character_sex, solo_slot};
+
+    #[test]
+    fn stop_ack_confirms_destination_without_replaying_server_step() {
+        let mut app = crate::App::new(crate::config::Config::default());
+        let mut player = super::Entity::new_player(1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 102, 58, 0);
+        player.movement.set_position(102.0, 58.2);
+        app.game.world.entities.set_player_id(1);
+        app.game.world.entities.insert(player);
+        app.input.stop_walk_at = Some((102, 58));
+
+        // An earlier walk reply must not consume the outstanding stop.
+        app.handle_player_moved(102, 57, 102, 65, 100);
+        assert_eq!(app.input.stop_walk_at, Some((102, 58)));
+        app.handle_player_moved(102, 57, 102, 58, 110);
+        let player = app.game.world.entities.player_mut().unwrap();
+        assert!(!player.movement.is_moving());
+        player.movement.decay_correction(1.0);
+        assert_eq!(player.movement.position(), (102.0, 58.0));
+        assert_eq!(app.input.stop_walk_at, None);
+        assert!(app.input.walk_server_acked);
+    }
 
     #[test]
     fn a_character_keeps_its_own_sex() {

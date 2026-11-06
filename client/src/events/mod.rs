@@ -271,6 +271,9 @@ impl App {
                     self.handle_entity_vanished(gid, vanish_type);
                 }
                 GameEvent::EntityStopMove { gid, x, y } => {
+                    if self.game.world.entities.player_id() == Some(gid) {
+                        self.input.stop_walk_at = None;
+                    }
                     self.game.world.entities.apply_entity_stop_move(gid, x, y);
                 }
                 GameEvent::EntityHighJumped { gid, x, y } => {

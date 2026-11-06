@@ -59,6 +59,16 @@ impl MovementState {
         self.server_start_tick = Some(tick);
     }
 
+    /// Walks on: `path` continues from the current destination (as `path_search` returns it, source
+    /// excluded), so a walk topped up before it ends never stands still between requests.
+    pub fn extend_path(&mut self, path: Vec<PathNode>) {
+        if !self.moving || path.is_empty() {
+            return;
+        }
+        self.path.extend(path);
+        self.build_times();
+    }
+
     pub fn server_start_tick(&self) -> Option<u32> {
         self.server_start_tick
     }

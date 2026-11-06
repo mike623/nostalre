@@ -290,6 +290,7 @@ impl App {
             None => return,
         };
 
+        self.input.stop_walk_at = None;
         self.channel.send_packet(build_request_move_packet(
             move_action.dest_x,
             move_action.dest_y,

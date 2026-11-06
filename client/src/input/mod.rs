@@ -22,6 +22,9 @@ pub struct InputState {
     pub mouse_position: (f64, f64),
     pub walk_packet_cooldown: f32,
     pub walk_server_acked: bool,
+    /// The cell a stick release asked the server to stop at, while its reply is outstanding: the player is
+    /// already there, so the reply only confirms it instead of replaying the step the server took to catch up.
+    pub stop_walk_at: Option<(u16, u16)>,
     pub alt_pressed: bool,
     pub shift_pressed: bool,
     pub ctrl_pressed: bool,
@@ -42,6 +45,7 @@ impl InputState {
             mouse_position: (0.0, 0.0),
             walk_packet_cooldown: 0.0,
             walk_server_acked: true,
+            stop_walk_at: None,
             alt_pressed: false,
             shift_pressed: false,
             ctrl_pressed: false,

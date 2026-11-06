@@ -16,6 +16,7 @@ pub(crate) enum SessionChange {
 
 impl App {
     pub(crate) fn on_session_change(&mut self, change: SessionChange) {
+        self.input.stop_walk_at = None;
         match change {
             SessionChange::MapChange => {
                 self.game.reset_effects(&mut self.effect_queue);

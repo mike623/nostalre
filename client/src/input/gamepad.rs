@@ -37,11 +37,24 @@ const DEADZONE: f32 = 0.1;
 /// Cursor speed at full tilt, logical pixels per second: four times roBrowser's (joySense 25), for a handheld's
 /// screen at 150%
 const CURSOR_SPEED: f32 = 1000.0;
-/// Cells ahead the walk aims at full tilt; a partial tilt aims shorter.
-const WALK_REACH: f32 = 3.0;
+/// Cells ahead the walk aims at. The stick gives the direction only: RO walks at one speed however far it is
+/// pushed, so a light push only ended the walk sooner (a request per cell).
+///
+/// The reach also sets how finely the heading can be aimed: the cell aimed at is rounded to the map, so a short
+/// reach only offers coarsely spaced headings. At 3 cells a 45° push lands exactly on it, but an 11 o'clock push
+/// (30° off vertical) has no cell nearby and falls on 18° or 34° — the walk visibly steps left, left-and-up,
+/// left. Each chunk is continued along the same aim (`StickWalk::dir`) so a long reach is one straight line.
+const WALK_REACH: f32 = 8.0;
 /// A walk request is repeated at least this often while the stick is held (the server walks one cell each
 /// `speed` ms, this is its fallback when the speed is unknown).
 const WALK_REPEAT_FALLBACK: Duration = Duration::from_millis(150);
+/// A camera turn past this (radians, about 3°) re-aims a held stick: the cell it aimed at was a screen
+/// direction, and the screen has turned.
+const YAW_REAIM: f32 = 0.05;
+/// A push turned by more than this (radians, about 17°) re-aims a held stick. Which octant the stick falls
+/// in is not used: an analog stick sitting on a boundary flickers between two of them, and each flicker
+/// sent another request (three in 30 ms on a real pad).
+const REAIM_ANGLE: f32 = 0.3;
 /// Search radius, in cells, for X (monsters) and Y (floor items).
 const REACH_CELLS: i32 = 20;
 /// The camera at full trigger: degrees turned or tilted a second; a light press goes slower (squared)
@@ -134,15 +147,29 @@ fn hotbar_slot(group: Group, face: Button, set: u8) -> Option<usize> {
     Some(PAD_SET_SLOTS * set as usize + 4 * group + face)
 }
 
-/// Octant 0..8 of a direction, for "walk again when the direction turns".
-fn octant(x: f32, y: f32) -> i32 {
-    ((y.atan2(x) / std::f32::consts::FRAC_PI_4).round() as i32) & 7
+/// A push as a unit direction, `(0.0, 0.0)` when it is at rest.
+fn stick_dir(x: f32, y: f32) -> (f32, f32) {
+    let length = (x * x + y * y).sqrt();
+    match length > 0.0 {
+        true => (x / length, y / length),
+        false => (0.0, 0.0),
+    }
+}
+
+/// The angle between two unit directions, radians.
+fn angle_between(a: (f32, f32), b: (f32, f32)) -> f32 {
+    (a.0 * b.0 + a.1 * b.1).clamp(-1.0, 1.0).acos()
 }
 
 /// The cell the left stick aims at from `cell`: `stick` is the raw stick (y down), `yaw` the camera's.
 fn walk_target(cell: (u16, u16), stick: (f32, f32), yaw: f32) -> (i32, i32) {
+    // the push gives the direction only (see `WALK_REACH`): a light tilt must reach as far as a full one
+    let length = (stick.0 * stick.0 + stick.1 * stick.1).sqrt();
+    let (sx, sy) = match length > 0.0 {
+        true => (stick.0 / length, -stick.1 / length),
+        false => (0.0, 0.0),
+    };
     // screen up is +y on the map at yaw 0; the camera's yaw turns the screen over the map
-    let (sx, sy) = (stick.0, -stick.1);
     let (sin, cos) = yaw.sin_cos();
     let dx = sx * cos - sy * sin;
     let dy = sx * sin + sy * cos;
@@ -168,6 +195,34 @@ pub(crate) struct ActionHints {
     pub monster: Option<u32>,
 }
 
+/// The cell the left stick last aimed at, and how it was aimed
+#[derive(Clone, Copy)]
+struct StickWalk {
+    /// When the request went
+    at: Instant,
+    /// The push's unit direction, in screen space (y down), as it was aimed
+    dir: (f32, f32),
+    /// The camera's yaw then
+    yaw: f32,
+    /// The cell it aimed at
+    target: (i32, i32),
+}
+
+impl StickWalk {
+    /// The same push still aims here: the same direction, no camera turn under it, and not arrived yet.
+    /// `dir`/`yaw` are where the stick and the camera point now; `arrived` the walk here being over.
+    fn keeps(&self, dir: (f32, f32), yaw: f32, arrived: bool) -> bool {
+        !arrived
+            && angle_between(self.dir, dir) < REAIM_ANGLE
+            && (self.yaw - yaw).abs() < YAW_REAIM
+    }
+}
+
+/// A cell as the map indexes it, when `(x, y)` is one
+fn map_cell((x, y): (i32, i32)) -> Option<(u16, u16)> {
+    Some((u16::try_from(x).ok()?, u16::try_from(y).ok()?))
+}
+
 #[derive(Default)]
 pub(crate) struct Gamepad {
     held: HashSet<Button>,
@@ -181,8 +236,9 @@ pub(crate) struct Gamepad {
     readout: f32,
     /// R3 was pressed: the starting view, next frame
     reset: bool,
-    /// Last walk request: when, and the octant it went.
-    walk: Option<(Instant, i32)>,
+    /// The walk the stick last asked for: held while the push keeps its direction, so the request is
+    /// not replaced mid-step.
+    walk: Option<StickWalk>,
     last_frame: Option<Instant>,
     /// The pad drives the cursor from here (logical px), seeded from the mouse position.
     cursor: Option<(f32, f32)>,
@@ -897,63 +953,183 @@ impl App {
         self.window_event(event_loop, window, event);
     }
 
-    /// Left stick: walk toward where it points, relative to the camera. A request goes out when the direction
-    /// turns, else once per cell walked.
+    /// Left stick: walk toward where it points, relative to the camera. The cell it aims at is held while the
+    /// push keeps its direction, and the walk is topped up a cell before it ends, as a held click keeps its
+    /// point: a new destination every step (or a walk left to run out) makes the server stop the player between
+    /// requests, a stall a click never has.
     fn gamepad_walk(&mut self, now: Instant) {
         let (mut x, mut y) = self.gamepad.stick(axis::X, axis::Y);
         if x == 0.0 && y == 0.0 {
             (x, y) = self.windows.hud.touch_input().stick;
             (x, y) = (dead(x), dead(y));
         }
-        if (x == 0.0 && y == 0.0) || self.game.session.app_state != AppState::InGame {
+        if self.game.session.app_state != AppState::InGame {
             self.gamepad.walk = None;
             return;
         }
-        let Some(player) = self.game.world.entities.player() else {
+        if x == 0.0 && y == 0.0 {
+            // the stick was let go: stop at the cell under the player, not at the end of the aim
+            if self.gamepad.walk.take().is_some() {
+                self.stop_stick_walk();
+            }
             return;
-        };
-        let cell = player.movement.cell_position();
-        let repeat = match player.speed {
-            0 => WALK_REPEAT_FALLBACK,
-            ms => Duration::from_millis(ms as u64),
+        }
+        let (cell, moving, repeat) = match self.game.world.entities.player() {
+            Some(player) => (
+                player.movement.cell_position(),
+                player.movement.is_moving(),
+                match player.speed {
+                    0 => WALK_REPEAT_FALLBACK,
+                    ms => Duration::from_millis(ms as u64),
+                },
+            ),
+            None => return,
         };
         let yaw = self.renderer.as_ref().map_or(0.0, |r| r.camera.yaw);
-        let (tx, ty) = walk_target(cell, (x, y), yaw);
-        let turn = octant(x, -y);
-        let due = self
-            .gamepad
-            .walk
-            .is_none_or(|(at, last)| last != turn || now.duration_since(at) >= repeat);
+        let dir = stick_dir(x, y);
+        let last = self.gamepad.walk;
+        let here = (cell.0 as i32, cell.1 as i32);
+        let arrived = !moving && last.is_some_and(|walk| walk.target == here);
+        let keeps = last.is_some_and(|walk| walk.keeps(dir, yaw, arrived));
+        // a cell before the end of the walk: walk it on from the cell it was going to, so the player never
+        // stands still waiting for the next request
+        let ending = moving
+            && keeps
+            && last
+                .and_then(|walk| map_cell(walk.target))
+                .is_some_and(|target| target != cell && cell_distance(cell, target) <= 1);
+        if ending
+            && let Some(walk) = last
+            && let Some(origin) = map_cell(walk.target)
+        {
+            // the held direction, not the jittering stick: a top-up must continue the same line
+            let (nx, ny) = walk_target(origin, walk.dir, yaw);
+            self.stop_attacking();
+            if let Some((tx, ty)) = self.walk_to(nx, ny, Some(origin)) {
+                self.gamepad.walk = Some(StickWalk {
+                    at: now,
+                    dir: walk.dir,
+                    yaw,
+                    target: (tx as i32, ty as i32),
+                });
+                return;
+            }
+            // no way on past the walk's end (a wall, a stun): let it finish and aim afresh, but do not run
+            // the path search every frame until then
+            self.gamepad.walk = Some(StickWalk { at: now, ..walk });
+            return;
+        }
+        let target = match last {
+            Some(walk) if keeps => walk.target,
+            _ => walk_target(cell, dir, yaw),
+        };
+        let due = match last {
+            Some(walk) => !keeps || now.duration_since(walk.at) >= repeat,
+            None => true,
+        };
         if !due {
             return;
         }
-        self.gamepad.walk = Some((now, turn));
         self.stop_attacking();
-        self.walk_to(tx, ty);
+        // a refused request (a wall, a stun, a server-driven move) leaves the aim in place, so the path search
+        // is not run every frame; a turned push or the retry after `repeat` asks again
+        let aim = self.walk_to(target.0, target.1, None).map_or(target, |(tx, ty)| {
+            (tx as i32, ty as i32)
+        });
+        self.gamepad.walk = Some(StickWalk {
+            at: now,
+            dir,
+            yaw,
+            target: aim,
+        });
     }
 
-    /// A walk request toward `(x, y)`, cut to where the path from the player can go.
-    fn walk_to(&mut self, x: i32, y: i32) {
-        let Some(gat) = &self.game.session.gat else {
+    /// Letting the stick go stops the walk where the player is. RO has no stop packet, so the stop is asked for
+    /// the way the server does understand one: a move to the cell the player is already on (its path comes back
+    /// empty and it answers with a zero-length move, `handle_player_moved`'s start == dest). The local walk
+    /// stops at once so the release is immediate; the reply only confirms the cell.
+    fn stop_stick_walk(&mut self) {
+        let Some(player) = self.game.world.entities.player() else {
             return;
         };
-        let Some((sx, sy)) = self
-            .game
-            .world
-            .entities
-            .player()
-            .map(|e| e.movement.cell_position())
-        else {
+        if !player.movement.is_moving() {
             return;
-        };
-        if let Some(step) = nostalre_game::path::try_move_to(gat, sx, sy, x, y) {
-            self.channel
-                .send_packet(nostalre_network::build_request_move_packet(
-                    step.dest_x,
-                    step.dest_y,
-                    self.active_packetver,
-                ));
         }
+        let (x, y) = player.movement.cell_position();
+        self.input.stop_walk_at = Some((x, y));
+        if let Some(player) = self.game.world.entities.player_mut() {
+            player.movement.stop();
+        }
+        self.channel
+            .send_packet(nostalre_network::build_request_move_packet(
+                x,
+                y,
+                self.active_packetver,
+            ));
+    }
+
+    /// A walk request toward `(x, y)` from `from` (the player's cell when `None`), cut to where the path can
+    /// go; the cell it actually walks to, or none when the player cannot walk there now or is already on the
+    /// way. The guards are the click's (`handle_left_click`): a server-driven move, Hiding and a stun all drop a
+    /// request, and the retry the next frame is what jolts the player. A `from` continues a walk already on its
+    /// way (see `extend_path`).
+    fn walk_to(&mut self, x: i32, y: i32, from: Option<(u16, u16)>) -> Option<(u16, u16)> {
+        // an NPC's dialog or a shop takes the click too
+        if self.windows.npc_dialog.dialog.is_open() || self.windows.npc_shop.shop.is_open() {
+            return None;
+        }
+        if self.game.player_moves_on_its_own()
+            || self.player_hide_move_blocked()
+            || self.is_local_player_incapacitated()
+        {
+            return None;
+        }
+        let (cell, moving, destination) = match self.game.world.entities.player() {
+            Some(player) => (
+                player.movement.cell_position(),
+                player.movement.is_moving(),
+                player.movement.destination(),
+            ),
+            None => return None,
+        };
+        let (sx, sy) = from.unwrap_or(cell);
+        // Already walking to that cell: a second request would replace the path with the same one, and the
+        // server's notification would reposition the player at each seam. The path search is skipped too.
+        if from.is_none()
+            && let (Ok(dx), Ok(dy)) = (u16::try_from(x), u16::try_from(y))
+            && moving
+            && destination == Some((dx, dy))
+        {
+            return Some((dx, dy));
+        }
+        let Some(gat) = &self.game.session.gat else {
+            return None;
+        };
+        let Some(step) = nostalre_game::path::try_move_to(gat, sx, sy, x, y) else {
+            return None;
+        };
+        // the path stops short when the cell asked for cannot be reached (a wall in the way): walk and aim at
+        // where it does get to, so the hold continues from there instead of re-searching for a lost cell
+        let (dest_x, dest_y) = step
+            .path
+            .last()
+            .map_or((step.dest_x, step.dest_y), |node| (node.x, node.y));
+        self.input.stop_walk_at = None;
+        self.channel
+            .send_packet(nostalre_network::build_request_move_packet(
+                dest_x,
+                dest_y,
+                self.active_packetver,
+            ));
+        // a top-up walks on from where the walk already goes: keep the local path in step, so the server's
+        // notification echoes a destination the client already has (`handle_player_moved`'s
+        // `already_moving_to_dest`) instead of repositioning the player back a cell
+        if from.is_some()
+            && let Some(player) = self.game.world.entities.player_mut()
+        {
+            player.movement.extend_path(step.path);
+        }
+        Some((dest_x, dest_y))
     }
 
     /// What the action buttons would hit now, for the on-screen hints; `None` while neither a controller nor the
@@ -1198,9 +1374,57 @@ mod tests {
 
     #[test]
     fn walk_aims_up_the_screen_at_full_tilt() {
-        assert_eq!(walk_target((100, 100), (0.0, -1.0), 0.0), (100, 103));
-        assert_eq!(walk_target((100, 100), (1.0, 0.0), 0.0), (103, 100));
-        assert_eq!(walk_target((100, 100), (0.0, -0.5), 0.0), (100, 102));
+        assert_eq!(walk_target((100, 100), (0.0, -1.0), 0.0), (100, 108));
+        assert_eq!(walk_target((100, 100), (1.0, 0.0), 0.0), (108, 100));
+        assert_eq!(walk_target((100, 100), (0.0, -0.5), 0.0), (100, 108));
+    }
+
+    /// The aim is a cell, so the heading it gives is only as fine as the reach: a 45° push must stay exactly
+    /// 45° (it always did) and an 11 o'clock push must not fall back to a staircase of left / left-and-up.
+    #[test]
+    fn a_held_aim_keeps_one_heading_between_45_and_the_axis() {
+        let step = |dir: (f32, f32)| {
+            let (x, y) = walk_target((100, 100), dir, 0.0);
+            (x - 100, y - 100)
+        };
+        assert_eq!(step((1.0, -1.0)), (6, 6));
+        // 11 o'clock: 30° off the vertical, held for a run of chunks, each aimed from the cell the last one
+        // aimed at (what a held stick does)
+        let (sin, cos) = (30f32).to_radians().sin_cos();
+        let held = stick_dir(-sin, -cos);
+        let mut origin = (100i32, 100i32);
+        let mut headings = Vec::new();
+        for _ in 0..6 {
+            let target = walk_target((origin.0 as u16, origin.1 as u16), held, 0.0);
+            let (dx, dy) = (target.0 - origin.0, target.1 - origin.1);
+            // degrees off the vertical, positive toward the left of the map
+            headings.push((-(dx as f32)).atan2(dy as f32));
+            origin = target;
+        }
+        let want = 30f32.to_radians();
+        for heading in &headings {
+            assert!((heading - want).abs() < 0.05, "{:?}", headings);
+        }
+    }
+
+    #[test]
+    fn a_held_push_keeps_its_cell_until_it_turns_or_arrives() {
+        let dir = stick_dir(0.0, -1.0);
+        let walk = StickWalk {
+            at: Instant::now(),
+            dir,
+            yaw: 0.0,
+            target: (100, 103),
+        };
+        assert!(walk.keeps(dir, walk.yaw, false));
+        // the camera moved under it: the screen's up is a different cell now
+        assert!(!walk.keeps(dir, walk.yaw + 2.0 * YAW_REAIM, false));
+        // a push resting on an octant boundary: a few degrees of stick jitter is still the same walk
+        assert!(walk.keeps(stick_dir(0.05, -1.0), walk.yaw, false));
+        // the push turned a quarter
+        assert!(!walk.keeps(stick_dir(1.0, 0.0), walk.yaw, false));
+        // arrived, still holding: a fresh cell to walk to
+        assert!(!walk.keeps(dir, walk.yaw, true));
     }
 
     #[test]

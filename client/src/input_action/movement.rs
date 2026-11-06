@@ -284,6 +284,7 @@ impl App {
                     .and_then(|p| p.movement.destination())
                     .is_none_or(|(dx, dy)| dx != move_action.dest_x || dy != move_action.dest_y);
                 if dest_changed {
+                    self.input.stop_walk_at = None;
                     self.channel.send_packet(build_request_move_packet(
                         move_action.dest_x,
                         move_action.dest_y,
@@ -292,6 +293,7 @@ impl App {
                 }
                 return true;
             }
+            self.input.stop_walk_at = None;
             self.channel.send_packet(build_request_move_packet(
                 move_action.dest_x,
                 move_action.dest_y,
