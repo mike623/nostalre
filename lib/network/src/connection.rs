@@ -4,9 +4,10 @@ use std::panic;
 use packets::packets::Packet;
 use packets::packets_parser;
 use nostalre_profiling::debug::{self, PacketTrace};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpStream;
-use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
+
+use crate::tunnel::Tunnel;
 
 use crate::rathena_table::{self, WireLen};
 use crate::solo_packets::PacketZcHpInfo;
@@ -39,16 +40,30 @@ fn carries_secret(name: &str) -> bool {
 }
 
 pub struct Connection {
-    reader: OwnedReadHalf,
-    writer: OwnedWriteHalf,
+    reader: Box<dyn AsyncRead + Send + Unpin>,
+    writer: Box<dyn AsyncWrite + Send + Unpin>,
     recv_buffer: Vec<u8>,
     expect_aid_preamble: bool,
 }
 
 impl Connection {
-    pub async fn connect(addr: &str, expect_aid_preamble: bool) -> io::Result<Self> {
-        let stream = TcpStream::connect(addr).await?;
-        let (reader, writer) = stream.into_split();
+    /// Over TCP, or through an invitation link's gateway when `tunnel` is set.
+    pub async fn connect(
+        addr: &str,
+        expect_aid_preamble: bool,
+        tunnel: Option<&mut Tunnel>,
+    ) -> io::Result<Self> {
+        let (reader, writer): (Box<dyn AsyncRead + Send + Unpin>, Box<dyn AsyncWrite + Send + Unpin>) =
+            match tunnel {
+                Some(tunnel) => {
+                    let (r, w) = tokio::io::split(tunnel.open(addr).await?);
+                    (Box::new(r), Box::new(w))
+                }
+                None => {
+                    let (r, w) = TcpStream::connect(addr).await?.into_split();
+                    (Box::new(r), Box::new(w))
+                }
+            };
         Ok(Self {
             reader,
             writer,

@@ -9,6 +9,7 @@ mod packet_version_regression;
 pub mod rathena_table;
 pub mod sender;
 pub mod session;
+pub mod tunnel;
 pub mod solo_packets;
 
 use connection::{Connection, ConnectionError};
@@ -117,6 +118,8 @@ pub enum KeepaliveMode {
 
 pub enum NetworkCommand {
     Connect { addr: String, expect_aid: bool },
+    /// Route the following connections through an invitation link's gateway (`None`: plain TCP).
+    SetTunnel(Option<tunnel::Tunnel>),
     SendPacket(Vec<u8>),
     Disconnect,
     SetKeepalive(KeepaliveMode),
@@ -130,6 +133,7 @@ pub async fn network_loop(
     start_time: Instant,
 ) {
     let mut connection: Option<Connection> = None;
+    let mut tunnel: Option<tunnel::Tunnel> = None;
     let mut session = Session::new(packetver);
     let mut keepalive = KeepaliveMode::Off;
     let mut keepalive_interval = time::interval(Duration::from_secs(10));
@@ -271,7 +275,7 @@ pub async fn network_loop(
                                 }
                         }
                         Some(NetworkCommand::Connect { addr, expect_aid }) => {
-                            match Connection::connect(&addr, expect_aid).await {
+                            match Connection::connect(&addr, expect_aid, tunnel.as_mut()).await {
                                 Ok(conn) => {
                                     info!("connected to {addr}");
                                     connection = Some(conn);
@@ -282,6 +286,7 @@ pub async fn network_loop(
                                 }
                             }
                         }
+                        Some(NetworkCommand::SetTunnel(t)) => tunnel = t,
                         Some(NetworkCommand::Disconnect) => {
                             connection = None;
                             session.state = SessionState::Disconnected;
@@ -300,7 +305,7 @@ pub async fn network_loop(
         } else {
             match cmd_rx.recv().await {
                 Some(NetworkCommand::Connect { addr, expect_aid }) => {
-                    match Connection::connect(&addr, expect_aid).await {
+                    match Connection::connect(&addr, expect_aid, tunnel.as_mut()).await {
                         Ok(conn) => {
                             info!("connected to {addr}");
                             connection = Some(conn);
@@ -312,6 +317,7 @@ pub async fn network_loop(
                     }
                 }
                 Some(NetworkCommand::Disconnect) => {}
+                Some(NetworkCommand::SetTunnel(t)) => tunnel = t,
                 Some(NetworkCommand::SendPacket(_)) => {
                     error!("cannot send packet: not connected");
                 }

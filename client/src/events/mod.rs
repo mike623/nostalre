@@ -2120,6 +2120,11 @@ impl App {
                         continue;
                     };
                     let addr = format!("{}:{}", server.host, server.port);
+                    let tunnel = server.invite.as_deref().and_then(nostalre_network::tunnel::Tunnel::parse);
+                    if server.invite.is_some() && tunnel.is_none() {
+                        tracing::error!("login server '{}': invite is not an invitation link", server.name);
+                    }
+                    self.channel.send_cmd(NetworkCommand::SetTunnel(tunnel));
                     self.channel.send_cmd(NetworkCommand::Connect {
                         addr,
                         expect_aid: false,

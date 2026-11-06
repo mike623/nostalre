@@ -436,6 +436,10 @@ pub struct LoginServer {
     /// from the map server
     #[serde(default = "default_web_port")]
     pub web_port: u16,
+    /// A Ragnarok Offline invitation link (`https://host/#invite=...`): connect through the host's
+    /// Cloudflare tunnel instead of TCP to `host:port`
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub invite: Option<String>,
 }
 
 fn default_web_port() -> u16 {
@@ -449,6 +453,7 @@ impl Default for LoginServer {
             host: "127.0.0.1".to_string(),
             port: 6900,
             web_port: default_web_port(),
+            invite: None,
         }
     }
 }
