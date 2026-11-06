@@ -1,0 +1,51 @@
+name: macOS app
+
+on:
+  push:
+    branches: [main, ios-twro]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        run: |
+          rustup show
+          rustup target add x86_64-apple-darwin
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
+      - name: Build (arm64 + x86_64)
+        run: |
+          cargo build --release --locked -p nostalre-client --bin nostalre-client --target aarch64-apple-darwin
+          cargo build --release --locked -p nostalre-client --bin nostalre-client --target x86_64-apple-darwin
+          lipo -create -output target/nostalre-client \
+            target/aarch64-apple-darwin/release/nostalre-client \
+            target/x86_64-apple-darwin/release/nostalre-client
+
+      - name: Bundle
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          case "$GITHUB_REF" in refs/tags/*) ;; *) VERSION=0.1.0-${GITHUB_SHA::7} ;; esac
+          macos/bundle.sh target/nostalre-client "$VERSION"
+          ditto -c -k --keepParent target/nostalRE.app nostalRE-macos.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nostalRE-macos
+          path: nostalRE-macos.zip
+
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" nostalRE-macos.zip --generate-notes || gh release upload "$GITHUB_REF_NAME" nostalRE-macos.zip --clobber

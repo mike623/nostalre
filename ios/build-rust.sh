@@ -8,7 +8,7 @@ case "$PLATFORM_NAME" in
 esac
 cd "$SRCROOT/.."
 # Xcode's environment points cc at the iOS SDK for the wrong arch/target; let cargo/cc pick their own
-env -u SDKROOT -u IPHONEOS_DEPLOYMENT_TARGET -u LIBRARY_PATH -u CC -u CXX -u LD \
+IPHONEOS_DEPLOYMENT_TARGET=17.0 env -u SDKROOT -u LIBRARY_PATH -u CC -u CXX -u LD \
   cargo rustc --release --target "$TARGET" -p nostalre-client --lib --crate-type staticlib
 # mlua-sys links Lua as its own native library (-llua5.1), not bundled into the staticlib: keep a copy
 # at a fixed path beside it for the link

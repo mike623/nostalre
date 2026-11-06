@@ -13,6 +13,7 @@ targets:
     platform: iOS
     sources:
       - path: main.m
+      - path: Assets.xcassets
     preBuildScripts:
       - name: Build Rust client
         script: '"$SRCROOT/build-rust.sh"'
@@ -30,3 +31,6 @@ targets:
         "RUST_DIR[sdk=iphoneos*]": "$(SRCROOT)/../target/aarch64-apple-ios/release"
         OTHER_LDFLAGS: "$(RUST_DIR)/libnostalre_client.a $(RUST_DIR)/liblua5.1.a -liconv -lobjc -lc++ -framework Metal -framework QuartzCore -framework UIKit -framework Foundation -framework CoreGraphics -framework CoreFoundation -framework AudioToolbox -framework AVFoundation -framework CoreAudio -framework Security -framework SystemConfiguration -framework GameController -framework CoreHaptics"
         INFOPLIST_FILE: Info.plist
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        MARKETING_VERSION: 0.1.0
+        CURRENT_PROJECT_VERSION: 1
