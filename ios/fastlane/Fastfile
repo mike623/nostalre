@@ -1,0 +1,54 @@
+# Run from ios/:  fastlane <lane>
+#   setup  - once: register the bundle ID and create the App Store Connect app (Apple ID + 2FA)
+#   beta   - archive and upload a new TestFlight build
+#   status - latest TestFlight build number
+# Auth for beta/status: an App Store Connect API key when ASC_KEY_ID + ASC_ISSUER_ID are set
+# (key file ~/private_keys/AuthKey_<id>.p8), otherwise the Apple ID signed in to Xcode uploads.
+default_platform(:ios)
+
+APP_NAME = "nostalRE"
+
+def asc_key
+  return nil unless ENV["ASC_KEY_ID"] && ENV["ASC_ISSUER_ID"]
+  app_store_connect_api_key(
+    key_id: ENV["ASC_KEY_ID"],
+    issuer_id: ENV["ASC_ISSUER_ID"],
+    key_filepath: ENV["ASC_KEY_PATH"] || File.expand_path("~/private_keys/AuthKey_#{ENV['ASC_KEY_ID']}.p8")
+  )
+end
+
+platform :ios do
+  lane :setup do
+    produce(app_name: APP_NAME, sku: "nostalre", language: "English", app_version: "0.1.0")
+  end
+
+  lane :beta do |options|
+    key = asc_key
+    sh("cd .. && xcodegen generate -q")
+    # ponytail: timestamp build number, always increasing, no state to keep
+    build = options[:build] || Time.now.utc.strftime("%Y%m%d%H%M")
+    auth = key ? "-authenticationKeyID #{ENV['ASC_KEY_ID']} -authenticationKeyIssuerID #{ENV['ASC_ISSUER_ID']} -authenticationKeyPath #{key[:key_filepath]}" : ""
+    build_app(
+      project: "nostalRE.xcodeproj",
+      scheme: "nostalRE",
+      configuration: "Release",
+      destination: "generic/platform=iOS",
+      derived_data_path: "build",
+      output_directory: "build/export",
+      export_method: "app-store",
+      xcargs: "-allowProvisioningUpdates #{auth} CURRENT_PROJECT_VERSION=#{build}",
+      export_xcargs: "-allowProvisioningUpdates #{auth}",
+      # without an API key, Xcode's own account uploads during export
+      export_options: key ? {} : { destination: "upload", manageAppVersionAndBuildNumber: false }
+    )
+    if key
+      upload_to_testflight(api_key: key, skip_waiting_for_build_processing: true,
+                           changelog: options[:changelog])
+    end
+    UI.success("Uploaded build #{build}; TestFlight lists it after Apple processes it (~5-15 min)")
+  end
+
+  lane :status do
+    UI.message("latest TestFlight build: #{latest_testflight_build_number(api_key: asc_key)}")
+  end
+end

@@ -24,3 +24,5 @@
 /data/
 /ios/build/
 /ios/nostalRE.xcodeproj/
+/ios/fastlane/report.xml
+/ios/fastlane/README.md
