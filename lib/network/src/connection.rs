@@ -158,7 +158,12 @@ impl Connection {
         if data.len() < 2 {
             return FrameLen::Incomplete;
         }
-        match rathena_table::table().sent_len(u16::from_le_bytes([data[0], data[1]])) {
+        let id = u16::from_le_bytes([data[0], data[1]]);
+        // rAthena only parses 0x0187 (PING), but OpenKore's XKore 2 echoes it back: 6 bytes either way.
+        if id == 0x0187 {
+            return FrameLen::Known(6);
+        }
+        match rathena_table::table().sent_len(id) {
             Some(WireLen::Fixed(len)) if len >= 2 => FrameLen::Known(len),
             Some(WireLen::Variable) => Self::declared_len(data),
             _ => FrameLen::Unusable,

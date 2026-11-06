@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::lua_table::decode_euc_kr;
+use crate::lua_table::decode_resource_name;
 
 /// Bases the table's keys are relative to, longest first so `data/texture/`
 /// wins over `data/`.
@@ -19,7 +19,7 @@ pub struct ResNameTable {
 
 impl ResNameTable {
     pub fn parse(data: &[u8]) -> Self {
-        let text = decode_euc_kr(data);
+        let text = decode_resource_name(data);
         let mut entries = HashMap::new();
         let mut key: Option<String> = None;
         let mut token = String::new();

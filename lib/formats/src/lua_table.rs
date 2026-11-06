@@ -23,8 +23,13 @@ pub fn decode_euc_kr(data: &[u8]) -> String {
     decoded.into_owned()
 }
 
+/// Resource names are GRF paths, EUC-KR in every client (twRO's tables keep them Korean beside Big5 text)
+pub fn decode_resource_name(data: &[u8]) -> String {
+    encoding_rs::EUC_KR.decode(data).0.into_owned()
+}
+
 pub fn parse_item_res_table(data: &[u8]) -> HashMap<u32, String> {
-    let content = decode_euc_kr(data);
+    let content = decode_resource_name(data);
     let mut map = HashMap::new();
     for line in content.lines() {
         let line = line.trim();
@@ -422,8 +427,8 @@ pub fn parse_item_info(chunk: &[u8]) -> Result<HashMap<u32, ItemInfo>, LubError>
             id as u32,
             ItemInfo {
                 class_num: field("ClassNum").and_then(Value::as_number).and_then(to_id),
-                identified_resource: text("identifiedResourceName"),
-                unidentified_resource: text("unidentifiedResourceName"),
+                identified_resource: field("identifiedResourceName").and_then(Value::as_bytes).map(decode_resource_name),
+                unidentified_resource: field("unidentifiedResourceName").and_then(Value::as_bytes).map(decode_resource_name),
                 identified_name: text("identifiedDisplayName"),
                 unidentified_name: text("unidentifiedDisplayName"),
             },
