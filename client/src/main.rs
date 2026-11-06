@@ -152,9 +152,13 @@ struct App {
     /// Ragnarok Solo's hub chose the character: login, server and character select run by themselves behind
     /// `account::draw_entering` until the map loads, or until one of them fails and its window is needed after all
     solo_entering: bool,
+    switching_server: bool,
     /// A character select the char server answered with no map server up (just started with the app): asked again
     /// when due, `(due, slot, tries left)`; no due time while the asked-again one waits for its answer
     select_retry: Option<(Option<Instant>, u8, u8)>,
+    /// The login connection a launcher started the stack with was reset before the login server took it: tried
+    /// again when due, `(due, tries left)`; no due time while the asked-again one connects
+    login_retry: Option<(Option<Instant>, u8)>,
     account_background: Option<String>,
     account_anims: HashMap<u32, SpriteAnimationState>,
     char_create_built_appearance: Option<(u16, u16)>,
@@ -244,7 +248,9 @@ impl App {
             char_select_window: None,
             char_create_window: None,
             solo_entering: false,
+            switching_server: false,
             select_retry: None,
+            login_retry: None,
             account_background: None,
             account_anims: HashMap::new(),
             char_create_built_appearance: None,
@@ -274,21 +280,33 @@ impl App {
     /// Show the connection-server selection screen when more than one server is
     /// configured; otherwise go straight to the login screen with the sole server.
     fn setup_initial_screen(&mut self) {
-        self.select_login_server(0);
-        // ponytail: auto-login always uses the first login server; pick another by reordering login_servers
-        if let Some(solo) = &self.config.solo {
-            self.game.session.app_state = AppState::Login;
-            self.solo_entering = solo.char_id.is_some() || self.config.last_char_slot.is_some();
-            self.pending_events.push(GameEvent::RequestLogin {
-                username: solo.username.clone(),
-                password: solo.password.clone(),
-            });
+        if self.start_solo_login() {
             return;
         }
         if self.config.login_servers.len() <= 1 {
             self.game.session.app_state = AppState::Login;
             return;
         }
+        self.show_login_servers();
+    }
+
+    pub(crate) fn start_solo_login(&mut self) -> bool {
+        if let Some(solo) = &self.config.solo {
+            if self.config.login_servers.is_empty() {
+                return false;
+            }
+            self.game.session.app_state = AppState::Login;
+            self.solo_entering = solo.char_id.is_some() || self.config.last_char_slot.is_some();
+            self.pending_events.push(GameEvent::RequestLogin {
+                username: solo.username.clone(),
+                password: solo.password.clone(),
+            });
+            return true;
+        }
+        false
+    }
+
+    fn show_login_servers(&mut self) {
         let entries = self
             .config
             .login_servers
@@ -304,13 +322,6 @@ impl App {
         }
         self.login_server_list_window = Some(win);
         self.game.session.app_state = AppState::LoginServerSelect;
-    }
-
-    /// Adopt the connection server at `index`
-    fn select_login_server(&mut self, index: usize) {
-        if index < self.config.login_servers.len() {
-            self.selected_login_server = index;
-        }
     }
 
     fn load_map(&mut self, map_name: &str) {
@@ -528,13 +539,14 @@ impl App {
                 .enable_all()
                 .build()
                 .expect("failed to create network runtime");
-            rt.block_on(network_loop(
-                cmd_rx,
-                event_tx,
-                packetver,
-                debug_delay_ms,
-                start_time,
-            ));
+            rt.block_on(async {
+                // Dropping the receiver cancels even a stalled connect and discards the old session's events.
+                tokio::select! {
+                    biased;
+                    _ = event_tx.closed() => {},
+                    _ = network_loop(cmd_rx, event_tx.clone(), packetver, debug_delay_ms, start_time) => {},
+                }
+            });
         });
     }
 
@@ -573,7 +585,8 @@ impl App {
                         account_bg.clone().map(Into::into),
                         &line,
                     );
-                    (ui.finish(), Vec::new())
+                    let events = nostalre_ui_component::account::switch_server_button(&mut ui);
+                    (ui.finish(), events)
                 }
                 _ => (UiOutput::default(), Vec::new()),
             };
@@ -630,8 +643,12 @@ impl App {
                     if self.account_dialog.state.is_some() {
                         ui.block_keyboard();
                     }
-                    let events = self.login_window.build(&mut ui);
+                    let mut events = self.login_window.build(&mut ui);
                     self.account_dialog.build(&mut ui);
+                    let switch = nostalre_ui_component::account::switch_server_button(&mut ui);
+                    if !switch.is_empty() {
+                        events = switch;
+                    }
                     (ui.finish(), events)
                 } else {
                     (UiOutput::default(), Vec::new())
@@ -1108,6 +1125,7 @@ impl ApplicationHandler for App {
                 self.fill_menu_settings();
                 self.flush_config(Some(Instant::now()));
                 self.retry_select_when_due(Instant::now());
+                self.retry_login_when_due(Instant::now());
                 let mut queued = std::mem::take(&mut self.pending_events);
                 queued.extend(ui_events);
                 self.handle_ui_events(queued, event_loop);

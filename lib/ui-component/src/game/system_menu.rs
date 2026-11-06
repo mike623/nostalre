@@ -244,6 +244,7 @@ enum MenuButton {
     Shortcut,
     Hotkeys,
     CharSelect,
+    SwitchServer,
     Quit,
     Restart,
     Resurrect,
@@ -258,6 +259,7 @@ impl MenuButton {
             MenuButton::Shortcut => SHORTCUT_ID,
             MenuButton::Hotkeys => HOTKEY_ID,
             MenuButton::CharSelect => CHARSELECT_ID,
+            MenuButton::SwitchServer => WidgetId(509),
             MenuButton::Quit => QUIT_ID,
             MenuButton::Restart => RESTART_ID,
             MenuButton::Resurrect => RESURRECT_ID,
@@ -272,6 +274,7 @@ impl MenuButton {
             MenuButton::Shortcut => &SHORTCUT_BTN,
             MenuButton::Hotkeys => &DUMMY_BTN,
             MenuButton::CharSelect => &CHARSELECT_BTN,
+            MenuButton::SwitchServer => &DUMMY_BTN,
             MenuButton::Quit => &QUIT_BTN,
             MenuButton::Restart => &RESTART_BTN,
             MenuButton::Resurrect => &RESURRECT_BTN,
@@ -286,6 +289,7 @@ impl MenuButton {
             MenuButton::Shortcut => "Shortcut",
             MenuButton::Hotkeys => "Hotkeys",
             MenuButton::CharSelect => "Character Select",
+            MenuButton::SwitchServer => "Switch server…",
             MenuButton::Quit => "Quit Game",
             MenuButton::Restart => "Restart",
             MenuButton::Resurrect => "Resurrect",
@@ -312,6 +316,7 @@ impl SystemMenu {
             }
             buttons.push(MenuButton::CharSelect);
             buttons.push(MenuButton::Quit);
+            buttons.push(MenuButton::SwitchServer);
             buttons
         } else if self.has_grf_textures {
             vec![
@@ -321,6 +326,7 @@ impl SystemMenu {
                 MenuButton::Shortcut,
                 MenuButton::Hotkeys,
                 MenuButton::Quit,
+                MenuButton::SwitchServer,
                 MenuButton::Resume,
             ]
         } else {
@@ -332,6 +338,7 @@ impl SystemMenu {
                 MenuButton::Hotkeys,
                 MenuButton::CharSelect,
                 MenuButton::Quit,
+                MenuButton::SwitchServer,
             ]
         }
     }
@@ -353,6 +360,10 @@ impl SystemMenu {
             }
             MenuButton::Hotkeys => {
                 events.push(GameEvent::ToggleHotkeyConfig);
+                self.open = false;
+            }
+            MenuButton::SwitchServer => {
+                events.push(GameEvent::SwitchLoginServer);
                 self.open = false;
             }
             MenuButton::CharSelect => self.pending_confirm = PendingConfirm::CharacterSelect,
@@ -409,7 +420,7 @@ impl SystemMenu {
 
         for (idx, &button) in buttons.iter().enumerate() {
             let rect = Rect::new(btn_x, btn_y(idx), btn_w, btn_h);
-            let clicked = if button == MenuButton::Hotkeys {
+            let clicked = if matches!(button, MenuButton::Hotkeys | MenuButton::SwitchServer) {
                 ui.text_button(button.id(), rect, button.label()).clicked()
             } else {
                 ui.button(button.id(), rect, button.textures(), button.label())
@@ -469,6 +480,23 @@ impl SystemMenu {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn switch_server_is_available_in_each_menu_style() {
+        for textured in [false, true] {
+            let mut menu = SystemMenu::new();
+            menu.has_grf_textures = textured;
+            for dead in [false, true] {
+                menu.open = true;
+                menu.dead = dead;
+                assert!(menu.buttons().contains(&MenuButton::SwitchServer));
+                let mut events = Vec::new();
+                menu.on_button_click(MenuButton::SwitchServer, &mut events);
+                assert!(matches!(events.as_slice(), [GameEvent::SwitchLoginServer]));
+                assert!(!menu.open);
+            }
+        }
+    }
     use crate::InGameWindow;
     use nostalre_game::character::Character;
     use nostalre_game::data_table::DataTable;
@@ -502,7 +530,7 @@ mod tests {
         let data = DataTable::new();
 
         let mut ctx = UiContext::new(800.0, 600.0);
-        let (mx, my) = button_center(600.0, 7, 0);
+        let (mx, my) = button_center(600.0, 8, 0);
         ctx.mouse_x = mx;
         ctx.mouse_y = my;
         ctx.mouse_clicked = true;
@@ -520,7 +548,7 @@ mod tests {
         let data = DataTable::new();
 
         let mut ctx = UiContext::new(800.0, 600.0);
-        let (mx, my) = button_center(600.0, 7, 1);
+        let (mx, my) = button_center(600.0, 8, 1);
         ctx.mouse_x = mx;
         ctx.mouse_y = my;
         ctx.mouse_clicked = true;
@@ -543,7 +571,7 @@ mod tests {
         let data = DataTable::new();
 
         let mut ctx = UiContext::new(800.0, 600.0);
-        let (mx, my) = button_center(600.0, 7, 5);
+        let (mx, my) = button_center(600.0, 8, 5);
         ctx.mouse_x = mx;
         ctx.mouse_y = my;
         ctx.mouse_clicked = true;
@@ -583,7 +611,7 @@ mod tests {
         let data = DataTable::new();
 
         let mut ctx = UiContext::new(800.0, 600.0);
-        let (mx, my) = button_center(600.0, 7, 6);
+        let (mx, my) = button_center(600.0, 8, 6);
         ctx.mouse_x = mx;
         ctx.mouse_y = my;
         ctx.mouse_clicked = true;
@@ -654,7 +682,7 @@ mod tests {
         let mut state = StateCache::new();
         let mut character = Character::new();
         let data = DataTable::new();
-        let (mx, my) = button_center(600.0, 7, 0);
+        let (mx, my) = button_center(600.0, 8, 0);
 
         let mut frame = |clicked: bool| {
             let mut ctx = UiContext::new(800.0, 600.0);
@@ -682,7 +710,7 @@ mod tests {
         let mut character = Character::new();
         let data = DataTable::new();
 
-        let (mx, my) = button_center(600.0, 3, 0);
+        let (mx, my) = button_center(600.0, 4, 0);
         let mut ctx = UiContext::new(800.0, 600.0);
         ctx.mouse_x = mx;
         ctx.mouse_y = my;
@@ -705,7 +733,7 @@ mod tests {
         let mut character = Character::new();
         let data = DataTable::new();
 
-        let (mx, my) = button_center(600.0, 4, 1);
+        let (mx, my) = button_center(600.0, 5, 1);
         let mut ctx = UiContext::new(800.0, 600.0);
         ctx.mouse_x = mx;
         ctx.mouse_y = my;

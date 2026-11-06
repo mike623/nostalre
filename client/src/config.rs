@@ -681,6 +681,22 @@ impl Default for Config {
 }
 
 impl Config {
+    /// The first entry is the remembered server; character IDs and slots belong to that server.
+    pub fn remember_login_server(&mut self, index: usize) -> bool {
+        if index >= self.login_servers.len() {
+            return false;
+        }
+        if index != 0 {
+            let server = self.login_servers.remove(index);
+            self.login_servers.insert(0, server);
+            self.last_char_slot = None;
+            if let Some(solo) = &mut self.solo {
+                solo.char_id = None;
+            }
+        }
+        true
+    }
+
     pub fn effective_bgm_volume(&self) -> f32 {
         if self.bgm_enabled {
             self.bgm_volume
@@ -740,6 +756,39 @@ impl Config {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn server_choice_survives_restart_without_reusing_another_servers_character() {
+        let mut config = Config::default();
+        config.login_servers.push(LoginServer {
+            name: "Second".into(),
+            port: 6901,
+            ..LoginServer::default()
+        });
+        config.solo = Some(SoloLaunch {
+            username: "player".into(),
+            password: "test".into(),
+            char_id: Some(42),
+        });
+        config.last_char_slot = Some(3);
+        assert!(!config.remember_login_server(2));
+        assert!(config.remember_login_server(0));
+        assert_eq!(config.last_char_slot, Some(3));
+        assert_eq!(config.solo.as_ref().unwrap().char_id, Some(42));
+        assert!(config.remember_login_server(1));
+        let saved = serde_json::to_string(&config).unwrap();
+        let loaded: Config = serde_json::from_str(&saved).unwrap();
+        assert_eq!(loaded.login_servers[0].name, "Second");
+        assert_eq!(loaded.login_servers[1].port, 6900);
+        assert_eq!(loaded.last_char_slot, None);
+        let solo = loaded.solo.unwrap();
+        assert_eq!(solo.char_id, None);
+        assert_eq!(solo.username, "player");
+        assert_eq!(solo.password, "test");
+        let mut empty = Config::default();
+        empty.login_servers.clear();
+        assert!(!empty.remember_login_server(0));
+    }
 
     #[test]
     fn a_rule_that_does_not_parse_is_left_out_and_saved_back_as_written() {

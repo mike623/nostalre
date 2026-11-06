@@ -20,6 +20,12 @@ use winit::event_loop::ActiveEventLoop;
 const SELECT_TRIES: u8 = 20;
 const SELECT_RETRY_DELAY: std::time::Duration = std::time::Duration::from_secs(1);
 
+/// How often and how long the login connection is tried again when a launcher started the server stack
+/// together with the client: its first connection is forwarded before the login server inside is listening,
+/// and the forwarder resets it (`retry_login_or_give_up`).
+const LOGIN_TRIES: u8 = 20;
+const LOGIN_RETRY_DELAY: std::time::Duration = std::time::Duration::from_secs(1);
+
 impl App {
     pub(super) fn handle_character_list_received(
         &mut self,
@@ -450,6 +456,7 @@ impl App {
         self.refresh_level_aura(account_id);
 
         self.select_retry = None;
+        self.login_retry = None;
         self.solo_entering = false;
         self.game.session.app_state = AppState::InGame;
         if !self.window_state_restored {
@@ -656,7 +663,10 @@ impl App {
     }
 
     pub(super) fn handle_disconnect_ack(&mut self, allowed: bool, event_loop: &ActiveEventLoop) {
-        if allowed {
+        let switching_server = std::mem::take(&mut self.switching_server);
+        if allowed && switching_server {
+            self.return_to_login_servers();
+        } else if allowed {
             self.capture_window_state();
             self.config.save("config.json");
             self.channel.send_cmd(NetworkCommand::Disconnect);
@@ -668,9 +678,50 @@ impl App {
         }
     }
 
+    /// Asks for the login again in a moment, while tries are left; then the dialog and why.
+    fn retry_login_or_give_up(&mut self, reason: String) {
+        let left = match self.login_retry {
+            Some((_, left)) => left,
+            None => LOGIN_TRIES,
+        };
+        if left == 0 {
+            self.login_retry = None;
+            self.solo_entering = false;
+            self.account_dialog
+                .show(&format!("Disconnected: {reason}"), false, |_| {});
+            return;
+        }
+        tracing::info!("login connection failed ({reason}), trying again ({left} tries left)");
+        self.login_retry = Some((Some(std::time::Instant::now() + LOGIN_RETRY_DELAY), left - 1));
+    }
+
+    /// The login `retry_login_or_give_up` put off, once it is due.
+    pub(crate) fn retry_login_when_due(&mut self, now: std::time::Instant) {
+        if let Some((Some(due), left)) = self.login_retry
+            && now >= due
+        {
+            self.login_retry = Some((None, left));
+            if !self.start_solo_login() {
+                self.login_retry = None;
+                self.solo_entering = false;
+            }
+        }
+    }
+
+    /// A launcher started the server stack with the client, and its first connection was reset before the
+    /// login server behind the forwarder was listening: wait for it instead of asking. A manual login, and
+    /// every disconnect once in game, keeps the dialog.
+    fn login_retry_wanted(&self) -> bool {
+        self.solo_entering
+            && self.config.solo.is_some()
+            && self.game.session.app_state != AppState::InGame
+    }
+
     pub(super) fn handle_disconnected(&mut self, reason: String, event_loop: &ActiveEventLoop) {
         if reason == "User exit" {
             event_loop.exit();
+        } else if self.switching_server {
+            self.return_to_login_servers();
         } else if self.game.session.app_state == AppState::InGame {
             let reason_clone = reason.clone();
             self.game.session.disconnect_dialog_shown = true;
@@ -679,6 +730,8 @@ impl App {
                 false,
                 |_| {},
             );
+        } else if self.login_retry_wanted() {
+            self.retry_login_or_give_up(reason);
         } else {
             self.solo_entering = false;
             self.account_dialog
@@ -688,6 +741,33 @@ impl App {
 }
 
 impl App {
+    pub(super) fn return_to_login_servers(&mut self) {
+        if self.game.session.app_state == AppState::InGame {
+            self.save_player_snapshot();
+            self.capture_window_state();
+            self.config.save("config.json");
+        }
+        self.solo_entering = false;
+        self.switching_server = false;
+        self.select_retry = None;
+        self.login_retry = None;
+        self.pending_events.clear();
+        self.clear_companions();
+        self.on_session_change(SessionChange::Logout);
+        self.game.session.login_session = None;
+        self.game.session.selected_character = None;
+        self.game.session.disconnect_dialog_shown = false;
+        self.server_list_window = None;
+        self.char_create_window = None;
+        self.account_anims.clear();
+        self.account_dialog.dismiss();
+        self.windows.confirm_dialog.dismiss();
+        self.windows.system_menu.close_dead();
+        self.windows.menu.close();
+        self.spawn_network();
+        self.show_login_servers();
+    }
+
     fn reconnect_to_char_server(&mut self) -> bool {
         if self.channel.cmd_tx.is_none() {
             return false;

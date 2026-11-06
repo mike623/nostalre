@@ -20,7 +20,7 @@ are lost on the next save.
 
 | Config key | Description | Default value | Mandatory |
 | --- | --- | --- | --- |
-| `login_servers` | Selectable connection servers. The first is used by default; with more than one entry the client shows a server selection screen after login. See [Login server](#login-server). | `[{"name": "Local", "host": "127.0.0.1", "port": 6900}]` | Yes |
+| `login_servers` | Selectable connection servers. The first is the remembered default; choosing a server moves it to the front. With more than one entry, manual login starts with server selection. See [Login server](#login-server). | `[{"name": "Local", "host": "127.0.0.1", "port": 6900}]` | Yes |
 | `keep_login_id` | Store the last login ID in `saved_username` and pre-fill it on the login screen. The password is never stored. | `false` | No |
 | `saved_username` | Login ID written back by the login screen when `keep_login_id` is on. | `""` | No |
 | `solo` | Set by Ragnarok Solo's hub: `{"username", "password", "char_id"}`, log in and enter that character directly, skipping the login and character select screens. | none | No |
@@ -61,6 +61,12 @@ are lost on the next save.
 | `custom` | Behaviour the original game has no counterpart for. See [custom](#custom). | see [custom](#custom) | No |
 
 ## Login server
+
+Use **Switch server…** in the Escape menu or on the login/auto-login screen (Escape also cancels connecting).
+Choose a configured server to reconnect; solo mode keeps auto-login enabled. The selection is remembered by
+moving that server to the front of `login_servers`. Switching to a different server clears the remembered
+character ID/slot so you can choose a character there. In-game switching waits for the server to allow logout.
+
 
 Each entry of `login_servers`.
 

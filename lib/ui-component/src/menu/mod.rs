@@ -64,11 +64,12 @@ enum Command {
     WorldMap,
     Settings,
     CharacterSelect,
+    SwitchServer,
     ExitGame,
 }
 
 /// The commands, the system ones after the gap
-const COMMANDS: [Command; 13] = [
+const COMMANDS: [Command; 14] = [
     Command::Items,
     Command::Equipment,
     Command::Skills,
@@ -81,6 +82,7 @@ const COMMANDS: [Command; 13] = [
     Command::WorldMap,
     Command::Settings,
     Command::CharacterSelect,
+    Command::SwitchServer,
     Command::ExitGame,
 ];
 const FIRST_SYSTEM: usize = 10;
@@ -100,6 +102,7 @@ impl Command {
             Self::WorldMap => "World Map",
             Self::Settings => "Settings",
             Self::CharacterSelect => "Character Select",
+            Self::SwitchServer => "Switch server…",
             Self::ExitGame => "Exit Game",
         }
     }
@@ -118,6 +121,7 @@ impl Command {
             Self::WorldMap => "The world map and where you are.",
             Self::Settings => "Display, graphics, sound, keys and chat lines.",
             Self::CharacterSelect => "Leave the map for character select.",
+            Self::SwitchServer => "Disconnect and choose another server.",
             Self::ExitGame => "Close nostalRE.",
         }
     }
@@ -306,6 +310,11 @@ impl Menu {
             return;
         }
         self.confirm = None;
+        if command == Command::SwitchServer {
+            events.push(GameEvent::SwitchLoginServer);
+            self.close();
+            return;
+        }
         if let Some(screen) = command.screen() {
             self.set_screen(screen);
             return;
@@ -570,6 +579,16 @@ impl Menu {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn keyboard_can_switch_server_from_escape_menu() {
+        let mut menu = Menu::default();
+        menu.open = true;
+        menu.cursor = command_index(|c| c == Command::SwitchServer);
+        let events = frame_with(&mut menu, |ctx| ctx.key_enter = true);
+        assert!(matches!(events.as_slice(), [GameEvent::SwitchLoginServer]));
+        assert!(!menu.open);
+    }
     use nostalre_game::character::Character;
     use nostalre_game::data_table::DataTable;
     use nostalre_ui::context::UiContext;

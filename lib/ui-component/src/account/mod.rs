@@ -42,9 +42,64 @@ pub fn draw_entering(ui: &mut UiFrame, texture: Option<TexturePath>, line: &str)
     );
 }
 
+/// Available even while the connection dialog owns the rest of the screen.
+pub fn switch_server_button(ui: &mut UiFrame) -> Vec<nostalre_game::event::GameEvent> {
+    use nostalre_ui::frame::{WidgetId, WindowOrder};
+    use nostalre_ui::rect::Rect;
+    let rect = Rect::new(
+        (ui.ctx.screen_width - 220.0).max(0.0),
+        (ui.ctx.screen_height - 48.0).max(0.0),
+        204.0,
+        32.0,
+    );
+    ui.ensure_in_z_order_with(WidgetId(7040), WindowOrder::Foreground);
+    ui.enter_window(WidgetId(7040), rect);
+    // Escape remains available while a non-interactive connection message blocks keyboard input.
+    if ui
+        .text_button(WidgetId(7041), rect, "Switch server… (Esc)")
+        .clicked()
+        || ui.ctx.key_escape
+    {
+        vec![nostalre_game::event::GameEvent::SwitchLoginServer]
+    } else {
+        Vec::new()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn switch_server_works_with_a_connection_dialog_by_mouse_or_escape() {
+        use crate::game::confirm_dialog::ConfirmDialog;
+        use nostalre_game::event::GameEvent;
+        for escape in [false, true] {
+            let mut ctx = UiContext::new(800.0, 600.0);
+            let mut state = StateCache::new();
+            let mut dialog = ConfirmDialog::new();
+            dialog.show_message("Please wait...");
+            for clicked in [false, true] {
+                ctx.mouse_x = 700.0;
+                ctx.mouse_y = 568.0;
+                ctx.mouse_clicked = clicked && !escape;
+                ctx.key_escape = clicked && escape;
+                let mut ui = test_frame(&mut ctx, &mut state);
+                let z = ui.get_z_order();
+                ui.compute_hovered_window(&z);
+                ui.block_keyboard();
+                dialog.build(&mut ui);
+                let events = switch_server_button(&mut ui);
+                assert_eq!(
+                    events
+                        .iter()
+                        .any(|e| matches!(e, GameEvent::SwitchLoginServer)),
+                    clicked
+                );
+                ui.finish();
+            }
+        }
+    }
 
     use nostalre_ui::context::UiContext;
     use nostalre_ui::state::StateCache;

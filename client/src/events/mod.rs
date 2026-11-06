@@ -166,6 +166,9 @@ impl App {
                 }
                 GameEvent::DisconnectAck { allowed } => {
                     self.handle_disconnect_ack(allowed, event_loop);
+                    if self.game.session.app_state == AppState::LoginServerSelect {
+                        break;
+                    }
                 }
 
                 GameEvent::MapEntered { x, y, dir, .. } => {
@@ -1444,6 +1447,9 @@ impl App {
                 }
                 GameEvent::Disconnected(reason) => {
                     self.handle_disconnected(reason, event_loop);
+                    if self.game.session.app_state == AppState::LoginServerSelect {
+                        break;
+                    }
                 }
                 GameEvent::ActionFailure { error_code } => {
                     if error_code != chat::ARROWFAIL_SUCCESS {
@@ -2140,12 +2146,33 @@ impl App {
                         self.active_packetver,
                     ));
                 }
+                GameEvent::SwitchLoginServer => {
+                    self.windows.system_menu.open = false;
+                    self.windows.menu.close();
+                    if self.game.session.app_state == AppState::InGame
+                        && !self.game.session.disconnect_dialog_shown
+                    {
+                        if !self.switching_server {
+                            self.switching_server = true;
+                            self.channel
+                                .send_packet(build_req_disconnect_packet(self.active_packetver));
+                        }
+                    } else {
+                        self.return_to_login_servers();
+                    }
+                    break;
+                }
                 GameEvent::SelectLoginServer { index } => {
                     self.sound_queue
                         .ui(nostalre_game::sound::tables::ui::BUTTON);
-                    self.select_login_server(index);
+                    if !self.config.remember_login_server(index) {
+                        continue;
+                    }
+                    self.selected_login_server = 0;
+                    self.config.save("config.json");
                     self.login_server_list_window = None;
                     self.game.session.app_state = AppState::Login;
+                    self.start_solo_login();
                 }
                 GameEvent::RequestSelectServer { index } => {
                     self.sound_queue

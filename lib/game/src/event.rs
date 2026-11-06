@@ -71,6 +71,7 @@ pub enum GameEvent {
         username: String,
         password: String,
     },
+    SwitchLoginServer,
     SelectLoginServer {
         index: usize,
     },
