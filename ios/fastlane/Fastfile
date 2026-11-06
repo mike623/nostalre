@@ -63,8 +63,9 @@ platform :ios do
     email = options[:email] || CredentialsManager::AppfileConfig.try_fetch_value(:apple_id)
     Spaceship::ConnectAPI.login(email, use_portal: false, use_tunes: true)
     app = Spaceship::ConnectAPI::App.find(CredentialsManager::AppfileConfig.try_fetch_value(:app_identifier))
-    app.get_builds(sort: "-uploadedDate", limit: 5).each do |b|
-      UI.message("build #{b.version}: #{b.processing_state}")
+    app.get_builds(sort: "-uploadedDate", limit: 5, includes: "buildBetaDetail").each do |b|
+      d = b.build_beta_detail
+      UI.message("build #{b.version}: #{b.processing_state}, internal #{d&.internal_build_state}, expired #{b.expired}")
     end
     group = app.get_beta_groups.find { |g| g.name == "Me" } ||
             create_internal_group(app, "Me")
@@ -78,6 +79,14 @@ platform :ios do
       Spaceship::ConnectAPI.post_beta_tester_assignment(beta_group_ids: [group.id], attributes: { email: email, firstName: user.first_name, lastName: user.last_name }) unless members.include?(email)
     else
       Spaceship::ConnectAPI::BetaTester.create(email: email, first_name: user.first_name, last_name: user.last_name, beta_group_ids: [group.id])
+    end
+    if options[:invite]
+      tester = Spaceship::ConnectAPI.get_beta_testers(filter: { betaGroups: group.id }).to_models.find { |t| t.email == email }
+      body = { data: { type: "betaTesterInvitations", relationships: {
+        app: { data: { type: "apps", id: app.id } },
+        betaTester: { data: { type: "betaTesters", id: tester.id } } } } }
+      Spaceship::ConnectAPI.client.test_flight_request_client.post("v1/betaTesterInvitations", body)
+      UI.message("invite email sent to #{email}")
     end
     UI.success("#{email} is in group Me; accept the TestFlight invite email on the iPhone")
   end
