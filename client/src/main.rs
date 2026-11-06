@@ -275,15 +275,18 @@ impl App {
     /// configured; otherwise go straight to the login screen with the sole server.
     fn setup_initial_screen(&mut self) {
         self.select_login_server(0);
+        // ponytail: auto-login always uses the first login server; pick another by reordering login_servers
+        if let Some(solo) = &self.config.solo {
+            self.game.session.app_state = AppState::Login;
+            self.solo_entering = solo.char_id.is_some() || self.config.last_char_slot.is_some();
+            self.pending_events.push(GameEvent::RequestLogin {
+                username: solo.username.clone(),
+                password: solo.password.clone(),
+            });
+            return;
+        }
         if self.config.login_servers.len() <= 1 {
             self.game.session.app_state = AppState::Login;
-            if let Some(solo) = &self.config.solo {
-                self.solo_entering = solo.char_id.is_some();
-                self.pending_events.push(GameEvent::RequestLogin {
-                    username: solo.username.clone(),
-                    password: solo.password.clone(),
-                });
-            }
             return;
         }
         let entries = self

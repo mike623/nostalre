@@ -46,7 +46,12 @@ impl App {
             .and_then(|solo| solo.char_id.take())
             .and_then(|char_id| {
                 solo_slot(char_win.characters.iter().map(|c| (c.gid, c.slot)), char_id)
-            });
+            })
+            // char_id is one-shot; on later launches enter the last-played character instead.
+            // solo_entering is cleared once in game, so returning to character select still shows the picker.
+            .or(self.config.last_char_slot.filter(|&s| {
+                self.solo_entering && char_win.characters.iter().any(|c| c.slot == s as i8)
+            }));
         self.char_select_window = Some(char_win);
         self.game.session.app_state = AppState::CharacterSelect;
         // the hub's character is not on this account after all: the picker shows
