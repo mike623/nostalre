@@ -61,7 +61,7 @@ platform :ios do
   # Once (Apple ID session): internal group that receives every build, with you in it; prints build status
   lane :testers do |options|
     email = options[:email] || CredentialsManager::AppfileConfig.try_fetch_value(:apple_id)
-    Spaceship::ConnectAPI.login(email, use_portal: false, use_tunes: true)
+    Spaceship::ConnectAPI.login(CredentialsManager::AppfileConfig.try_fetch_value(:apple_id), use_portal: false, use_tunes: true)
     app = Spaceship::ConnectAPI::App.find(CredentialsManager::AppfileConfig.try_fetch_value(:app_identifier))
     app.get_builds(sort: "-uploadedDate", limit: 5, includes: "buildBetaDetail").each do |b|
       d = b.build_beta_detail
@@ -71,7 +71,18 @@ platform :ios do
             create_internal_group(app, "Me")
     UI.message("group #{group.name} (internal: #{group.is_internal_group})")
     user = Spaceship::ConnectAPI::User.find(email: email).first
-    UI.user_error!("#{email} is not an App Store Connect user") unless user
+    unless user
+      # internal testers must be team members: invite with a limited role that sees only this app
+      if Array(Spaceship::ConnectAPI::UserInvitation.find(email: email)).empty?
+        Spaceship::ConnectAPI::UserInvitation.create(email: email, first_name: options[:first_name] || "Tester",
+          last_name: options[:last_name] || "nostalRE", roles: ["MARKETING"], provisioning_allowed: false,
+          all_apps_visible: false, visible_app_ids: [app.id])
+        UI.important("Team invite sent to #{email}. Accept it, then rerun: fastlane testers email:#{email}")
+      else
+        UI.important("Team invite to #{email} is still pending. Accept it, then rerun this lane.")
+      end
+      next
+    end
     tester = Array(Spaceship::ConnectAPI::BetaTester.find(email: email)).first
     if tester
       members = Spaceship::ConnectAPI.get_beta_testers(filter: { betaGroups: group.id }).to_models.map(&:email)
