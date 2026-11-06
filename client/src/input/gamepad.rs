@@ -25,7 +25,7 @@ use nostalre_game::aim::{
 };
 use nostalre_game::app_state::AppState;
 use nostalre_game::cursor::PendingSkillTarget;
-use nostalre_game::entity::{EntityState, EntityType};
+use nostalre_game::entity::{EntityCategory, EntityState, EntityType};
 use nostalre_game::entity_collection::TALK_RANGE;
 use nostalre_game::hotkey::{PAD_SET_SLOTS, PAD_SETS};
 use nostalre_game::keybinding::HotkeyAction;
@@ -161,6 +161,9 @@ pub(crate) struct ActionHints {
     /// A controller is in use (else the touch HUD)
     pub pad: bool,
     pub talk: Option<u32>,
+    /// Another player (a population shell included) Y / Talk opens the player menu for: with no item or NPC
+    /// in reach
+    pub player: Option<u32>,
     pub item: Option<u32>,
     pub monster: Option<u32>,
 }
@@ -496,6 +499,14 @@ impl App {
         }
         if in_game
             && group.is_none()
+            && self.windows.context_menu.is_open()
+            && self.context_menu_press(button)
+        {
+            self.gamepad.menu_presses.insert(button);
+            return;
+        }
+        if in_game
+            && group.is_none()
             && self.windows.npc_dialog.dialog.is_open()
             && self.dialog_press(button)
         {
@@ -533,8 +544,8 @@ impl App {
             ),
             Button::X if in_game => self.attack_closest_monster(),
             Button::Y if in_game => {
-                if !self.pick_up_closest_item() {
-                    self.talk_to_nearest_npc();
+                if !self.pick_up_closest_item() && !self.talk_to_nearest_npc() {
+                    self.open_nearest_player_menu();
                 }
             }
             Button::L3 if in_game => self.run_action(HotkeyAction::SitStand),
@@ -553,6 +564,19 @@ impl App {
             Button::X => self.with_ui(|ui| ui.pressed_codes.push(KeyCode::KeyS)),
             Button::L1 => self.with_ui(|ui| ui.pressed_codes.push(KeyCode::PageUp)),
             Button::R1 => self.with_ui(|ui| ui.pressed_codes.push(KeyCode::PageDown)),
+            _ => return false,
+        }
+        true
+    }
+
+    /// A player's (or any) pop-up menu: the D-pad picks a line, A chooses it, B closes; X and Y wait
+    fn context_menu_press(&mut self, button: Button) -> bool {
+        match button {
+            Button::A => self.with_ui(|ui| ui.key_enter = true),
+            Button::B => self.with_ui(|ui| ui.key_escape = true),
+            Button::Up => self.with_ui(|ui| ui.key_up = true),
+            Button::Down => self.with_ui(|ui| ui.key_down = true),
+            Button::X | Button::Y => {}
             _ => return false,
         }
         true
@@ -664,17 +688,24 @@ impl App {
         // Talk shows the NPC it would talk to; none while a dialog or a shop is up
         let talk = (!self.windows.npc_dialog.dialog.is_open()
             && !self.windows.npc_shop.shop.is_open())
-        .then(|| self.talkable_npc())
-        .flatten()
-        .map(|(_, name)| name.unwrap_or_default().to_string());
+        .then(|| {
+            self.talkable_npc()
+                .map(|(_, name)| name.unwrap_or_default().to_string())
+                // with no NPC near, Talk opens the nearest player's menu: name them
+                .or_else(|| {
+                    let id = self.closest_player()?;
+                    self.game.world.entities.get(id)?.name.clone()
+                })
+        })
+        .flatten();
         self.windows.hud.input.touch_slots.talk = talk;
         self.windows.hud.input.touch_slots.sit = self.sit_state();
         let touch = self.windows.hud.touch_input();
         if touch.attack {
             self.attack_closest_monster();
         }
-        if touch.talk {
-            self.talk_to_nearest_npc();
+        if touch.talk && !self.talk_to_nearest_npc() {
+            self.open_nearest_player_menu();
         }
         if touch.sit {
             self.run_action(HotkeyAction::SitStand);
@@ -936,10 +967,14 @@ impl App {
             return None;
         }
         let item = pad.then(|| self.closest_item()).flatten();
+        // Y picks up first, talks only with no item in reach, and opens the nearest player's menu only with
+        // neither, as `gamepad_press` does
+        let talk = if item.is_none() { self.talkable_npc().map(|(id, _)| id) } else { None };
+        let player = if item.is_none() && talk.is_none() { self.closest_player() } else { None };
         Some(ActionHints {
             pad,
-            // Y picks up first and talks only with no item in reach, as `gamepad_press` does
-            talk: if item.is_none() { self.talkable_npc().map(|(id, _)| id) } else { None },
+            talk,
+            player,
             item,
             monster: pad.then(|| self.closest_monster()).flatten(),
         })
@@ -957,6 +992,40 @@ impl App {
             .filter(|&(_, d)| d <= REACH_CELLS)
             .min_by_key(|&(_, d)| d)
             .map(|(id, _)| id)
+    }
+
+    /// The other player Y / Talk would open the menu for: the closest in talk range, population shells
+    /// included (they are players to the client)
+    pub(crate) fn closest_player(&self) -> Option<u32> {
+        let entities = &self.game.world.entities;
+        let me = entities.player()?;
+        let (px, py) = me.movement.cell_position();
+        entities
+            .iter()
+            .filter(|e| e.entity_type == EntityType::Player
+                    && e.id != me.id
+                    && e.category() != EntityCategory::Invisible)
+            .map(|e| (e.id, cell_distance((px, py), e.movement.cell_position())))
+            .filter(|&(_, d)| d <= TALK_RANGE as i32)
+            .min_by_key(|&(id, d)| (d, id))
+            .map(|(id, _)| id)
+    }
+
+    /// Opens the nearest player's menu (Whisper, Recruit to Party, Deal...) with its first line picked, beside
+    /// the screen centre the camera keeps you at; false when no player is near
+    pub(crate) fn open_nearest_player_menu(&mut self) -> bool {
+        let Some(items) = self.closest_player().and_then(|id| self.player_menu_items(id)) else {
+            return false;
+        };
+        let (w, h) = self.renderer.as_ref().map_or((1024.0, 768.0), |r| {
+            (
+                r.device.surface_config.width as f32 / r.dpi_scale,
+                r.device.surface_config.height as f32 / r.dpi_scale,
+            )
+        });
+        // ponytail: near the centre, not on the target's sprite; the ring and label mark which player it is
+        self.windows.context_menu.open_selected(w / 2.0 + 40.0, h / 2.0 - 80.0, items);
+        true
     }
 
     /// The floor item Y picks up now: the closest in reach

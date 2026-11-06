@@ -333,21 +333,38 @@ impl App {
     }
 
     fn open_entity_context_menu(&mut self, entity_id: Option<u32>) {
-        let Some(entity_id) = entity_id else {
+        let Some(items) = entity_id.and_then(|id| self.player_menu_items(id)) else {
             return;
         };
-        if Some(entity_id) == self.game.world.entities.player_id() {
-            return;
-        }
-        let Some(entity) = self.game.world.entities.get(entity_id) else {
-            return;
-        };
-        if entity.entity_type != EntityType::Player {
-            return;
-        }
         let (mx, my) = self.input.mouse_position;
+        self.windows
+            .context_menu
+            .open_at(mx as f32, my as f32, items);
+    }
+
+    /// The menu for another player (a population shell included): what a right-click on them opens and a
+    /// controller's Y on the nearest one. `None` for anyone else.
+    pub(crate) fn player_menu_items(&self, entity_id: u32) -> Option<Vec<ContextMenuItem>> {
+        if Some(entity_id) == self.game.world.entities.player_id() {
+            return None;
+        }
+        let entity = self.game.world.entities.get(entity_id)?;
+        if entity.entity_type != EntityType::Player {
+            return None;
+        }
         let target_aid = self.game.world.entities.account_id_of(entity_id);
-        let mut items = vec![
+        let mut items = Vec::new();
+        if let Some(name) = entity.name.clone().filter(|n| !n.is_empty()) {
+            items.push(ContextMenuItem {
+                label: "Whisper".to_string(),
+                action: ContextMenuAction::Whisper { name: name.clone() },
+            });
+            items.push(ContextMenuItem {
+                label: "Recruit to Party".to_string(),
+                action: ContextMenuAction::RecruitToParty { target_aid, name },
+            });
+        }
+        items.extend([
             ContextMenuItem {
                 label: "Deal".to_string(),
                 action: ContextMenuAction::RequestTrade { target_aid },
@@ -356,7 +373,7 @@ impl App {
                 label: "Invite to Party".to_string(),
                 action: ContextMenuAction::InviteToParty { target_aid },
             },
-        ];
+        ]);
         if matches!(entity.job, 0..=6 | 23) {
             items.push(ContextMenuItem {
                 label: "Adopt as Baby".to_string(),
@@ -409,9 +426,7 @@ impl App {
                 action: ContextMenuAction::AccountName { aid: target_aid },
             });
         }
-        self.windows
-            .context_menu
-            .open_at(mx as f32, my as f32, items);
+        Some(items)
     }
 
     pub(crate) fn handle_cursor_moved(&mut self, position: winit::dpi::PhysicalPosition<f64>) {

@@ -13,6 +13,11 @@ pub enum ContextMenuAction {
     InviteToParty {
         target_aid: u32,
     },
+    /// Whisper `party` (a population shell then holds still and accepts) and send the party invite
+    RecruitToParty {
+        target_aid: u32,
+        name: String,
+    },
     RequestTrade {
         target_aid: u32,
     },
@@ -84,6 +89,8 @@ pub struct ContextMenu {
     x: f32,
     y: f32,
     items: Vec<ContextMenuItem>,
+    /// The line the arrow keys (a controller's D-pad) have picked; Enter chooses it
+    selected: Option<usize>,
 }
 
 impl ContextMenu {
@@ -99,6 +106,13 @@ impl ContextMenu {
         self.x = x;
         self.y = y;
         self.items = items;
+        self.selected = None;
+    }
+
+    /// Opened from a controller or keys: the first line starts picked
+    pub fn open_selected(&mut self, x: f32, y: f32, items: Vec<ContextMenuItem>) {
+        self.open_at(x, y, items);
+        self.selected = self.open.then_some(0);
     }
 
     pub fn close(&mut self) {
@@ -123,7 +137,18 @@ impl ContextMenu {
         ui.begin_popup_layer(panel);
         crate::helper::fallback::panel(ui, panel.x, panel.y, panel.w, panel.h);
 
+        let last = self.items.len() - 1;
+        if ui.ctx.key_up {
+            self.selected = Some(self.selected.map_or(last, |i| if i == 0 { last } else { i - 1 }));
+        }
+        if ui.ctx.key_down {
+            self.selected = Some(self.selected.map_or(0, |i| if i == last { 0 } else { i + 1 }));
+        }
         let mut clicked_item = None;
+        if ui.ctx.key_enter && let Some(i) = self.selected {
+            clicked_item = Some(self.items[i].action.clone());
+        }
+        let escape = ui.ctx.key_escape;
         let mut any_hovered = false;
         for (idx, item) in self.items.iter().enumerate() {
             let iy = self.y + idx as f32 * ITEM_H;
@@ -132,6 +157,8 @@ impl ContextMenu {
             if resp.hovered() {
                 any_hovered = true;
                 ui.any_interactive_hovered = true;
+            }
+            if resp.hovered() || self.selected == Some(idx) {
                 let (v, i) =
                     draw::quad_vertices(rect.x, rect.y, rect.w, rect.h, [0.72, 0.79, 0.93, 1.0]);
                 ui.draw_calls.push(DrawCall {
@@ -149,6 +176,13 @@ impl ContextMenu {
         if let Some(action) = clicked_item {
             match action {
                 ContextMenuAction::InviteToParty { target_aid } => {
+                    events.push(GameEvent::RequestPartyInvite { target_aid });
+                }
+                ContextMenuAction::RecruitToParty { target_aid, name } => {
+                    events.push(GameEvent::RequestSendWhisper {
+                        name,
+                        message: "party".to_string(),
+                    });
                     events.push(GameEvent::RequestPartyInvite { target_aid });
                 }
                 ContextMenuAction::RequestTrade { target_aid } => {
@@ -234,7 +268,7 @@ impl ContextMenu {
                 }
             }
             self.close();
-        } else if ui.ctx.mouse_pressed && !any_hovered {
+        } else if escape || (ui.ctx.mouse_pressed && !any_hovered) {
             self.close();
         }
 
@@ -274,6 +308,42 @@ mod tests {
         let mut ui = test_frame(&mut ctx, &mut state);
         menu.build(&mut ui);
 
+        assert!(!menu.is_open());
+    }
+
+    #[test]
+    fn keys_pick_a_line_and_recruit_whispers_then_invites() {
+        let mut state = StateCache::new();
+        let mut menu = ContextMenu::new();
+        menu.open_selected(
+            100.0,
+            100.0,
+            vec![
+                ContextMenuItem {
+                    label: "Whisper".to_string(),
+                    action: ContextMenuAction::Whisper { name: "Elisin".to_string() },
+                },
+                ContextMenuItem {
+                    label: "Recruit to Party".to_string(),
+                    action: ContextMenuAction::RecruitToParty { target_aid: 7, name: "Elisin".to_string() },
+                },
+            ],
+        );
+
+        let mut ctx = UiContext::new(800.0, 600.0);
+        ctx.key_down = true;
+        let mut ui = test_frame(&mut ctx, &mut state);
+        assert!(menu.build(&mut ui).is_empty());
+        assert!(menu.is_open());
+
+        let mut ctx = UiContext::new(800.0, 600.0);
+        ctx.key_enter = true;
+        let mut ui = test_frame(&mut ctx, &mut state);
+        let events = menu.build(&mut ui);
+        assert!(matches!(&events[..], [
+            GameEvent::RequestSendWhisper { name, message },
+            GameEvent::RequestPartyInvite { target_aid: 7 },
+        ] if name == "Elisin" && message == "party"));
         assert!(!menu.is_open());
     }
 }

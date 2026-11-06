@@ -239,10 +239,10 @@ impl App {
         let font = &renderer.font_atlas;
         let line = font.line_height;
         const PROMPT: [f32; 4] = [1.0, 0.86, 0.35, 1.0];
-        let (talk, pick, attack) = if hints.pad {
-            ("[Y] Talk", "[Y] Pick up", "[X] Attack")
+        let (talk, interact, pick, attack) = if hints.pad {
+            ("[Y] Talk", "[Y] Interact", "[Y] Pick up", "[X] Attack")
         } else {
-            ("Talk", "", "")
+            ("Talk", "Talk", "", "")
         };
         let mut prompt = |entry: &RenderEntry, name: Option<(String, [f32; 4])>, text: &str, under_hover: bool| {
             let x = entry.screen_anchor[0];
@@ -257,7 +257,7 @@ impl App {
             self.build_plate_text(text, x - w / 2.0, y, PROMPT, font, calls);
         };
         let entities = &self.game.world.entities;
-        for (id, text) in [(hints.talk, talk), (hints.monster, attack)] {
+        for (id, text) in [(hints.talk, talk), (hints.player, interact), (hints.monster, attack)] {
             let Some(id) = id else { continue };
             let (Some(entity), Some(entry)) = (entities.get(id), render_list.iter().find(|e| e.id == id))
             else {

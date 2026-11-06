@@ -133,7 +133,7 @@ impl App {
         dt: f32,
         render_list: &[RenderEntry],
     ) -> Vec<ClipQuad> {
-        let talk = self.action_hints().and_then(|h| h.talk);
+        let talk = self.action_hints().and_then(|h| h.talk.or(h.player));
         let armed = self.game.companions.companion_attack_target;
         let attack_target = self.game.combat.attack_target_id;
         let assets = &mut self.game.assets;
@@ -172,7 +172,7 @@ impl App {
                 anchor,
             ));
         }
-        // the NPC Y / Talk would talk to: the lock ring under it
+        // the NPC Y / Talk would talk to, or with none the player whose menu it opens: the lock ring under it
         if let Some(entry) = talk.and_then(|id| render_list.iter().find(|e| e.id == id)) {
             clips.extend(target_cursor_clips(
                 cursor_act,
