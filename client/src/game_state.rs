@@ -578,6 +578,8 @@ pub struct AssetHandles {
     pub lock_cursor_animation: CursorAnimationState,
     /// Marker on a homunculus or mercenary target armed by the first Alt-click.
     pub companion_lock_animation: CursorAnimationState,
+    /// The ring under the NPC a controller's Y or the touch Talk would talk to
+    pub talk_hint_animation: CursorAnimationState,
     pub emotion_textures: Option<SpriteTextures>,
     pub emotion_act: Option<ActFile>,
     pub status_overlay_sprites: HashMap<AilmentOverlay, (SpriteTextures, ActFile)>,

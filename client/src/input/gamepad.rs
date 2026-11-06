@@ -156,6 +156,15 @@ fn dead(v: f32) -> f32 {
     if v.abs() <= DEADZONE { 0.0 } else { v }
 }
 
+/// The targets the action buttons would hit this frame (`App::action_hints`)
+pub(crate) struct ActionHints {
+    /// A controller is in use (else the touch HUD)
+    pub pad: bool,
+    pub talk: Option<u32>,
+    pub item: Option<u32>,
+    pub monster: Option<u32>,
+}
+
 #[derive(Default)]
 pub(crate) struct Gamepad {
     held: HashSet<Button>,
@@ -916,13 +925,30 @@ impl App {
         }
     }
 
-    fn attack_closest_monster(&mut self) {
-        let Some(player) = self.game.world.entities.player() else {
-            return;
-        };
-        let (px, py) = player.movement.cell_position();
-        let closest = self
-            .game
+    /// What the action buttons would hit now, for the on-screen hints; `None` while neither a controller nor the
+    /// touch HUD is in use, or out of game. Touch has only Talk.
+    pub(crate) fn action_hints(&self) -> Option<ActionHints> {
+        if self.game.session.app_state != AppState::InGame || self.windows.menu.is_open() {
+            return None;
+        }
+        let pad = self.ui_context.as_ref().is_some_and(|c| c.pad_labels);
+        if !pad && !self.windows.hud.shows_touch(false) {
+            return None;
+        }
+        let item = pad.then(|| self.closest_item()).flatten();
+        Some(ActionHints {
+            pad,
+            // Y picks up first and talks only with no item in reach, as `gamepad_press` does
+            talk: if item.is_none() { self.talkable_npc().map(|(id, _)| id) } else { None },
+            item,
+            monster: pad.then(|| self.closest_monster()).flatten(),
+        })
+    }
+
+    /// The monster X attacks now: the closest live one in reach
+    pub(crate) fn closest_monster(&self) -> Option<u32> {
+        let (px, py) = self.game.world.entities.player()?.movement.cell_position();
+        self.game
             .world
             .entities
             .iter()
@@ -930,33 +956,31 @@ impl App {
             .map(|e| (e.id, cell_distance((px, py), e.movement.cell_position())))
             .filter(|&(_, d)| d <= REACH_CELLS)
             .min_by_key(|&(_, d)| d)
-            .map(|(id, _)| id);
-        if let Some(id) = closest {
+            .map(|(id, _)| id)
+    }
+
+    /// The floor item Y picks up now: the closest in reach
+    pub(crate) fn closest_item(&self) -> Option<u32> {
+        let (px, py) = self.game.world.entities.player()?.movement.cell_position();
+        self.game
+            .world
+            .floor_items
+            .values()
+            .map(|item| (item.id, cell_distance((px, py), (item.x as u16, item.y as u16))))
+            .filter(|&(_, d)| d <= REACH_CELLS)
+            .min_by_key(|&(_, d)| d)
+            .map(|(id, _)| id)
+    }
+
+    fn attack_closest_monster(&mut self) {
+        if let Some(id) = self.closest_monster() {
             self.initiate_attack(id);
         }
     }
 
     /// False when no item lies within reach
     fn pick_up_closest_item(&mut self) -> bool {
-        let Some(player) = self.game.world.entities.player() else {
-            return false;
-        };
-        let (px, py) = player.movement.cell_position();
-        let closest = self
-            .game
-            .world
-            .floor_items
-            .values()
-            .map(|item| {
-                (
-                    item.id,
-                    cell_distance((px, py), (item.x as u16, item.y as u16)),
-                )
-            })
-            .filter(|&(_, d)| d <= REACH_CELLS)
-            .min_by_key(|&(_, d)| d)
-            .map(|(id, _)| id);
-        let Some(id) = closest else {
+        let Some(id) = self.closest_item() else {
             return false;
         };
         self.game.combat.attack_target_id = None;

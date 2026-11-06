@@ -101,6 +101,7 @@ impl App {
         self.build_vending_boards(render_list, &mut calls);
         self.build_chat_room_boards(render_list, &mut calls);
         self.build_floor_item_tooltip(hovered_floor_item_id, floor_item_render_list, &mut calls);
+        self.build_action_hints(render_list, floor_item_render_list, hovered_entity_id, &mut calls);
         self.build_debug_pick_bounds(render_list, floor_item_render_list, &mut calls);
 
         calls
@@ -220,6 +221,56 @@ impl App {
                 indices: indices.into(),
                 texture: UiTextureRef::Named(path.into()),
             });
+        }
+    }
+
+    /// Under each target an action button would hit now, its name and the button ("[Y] Talk"), as console
+    /// games prompt; the hovered entity already shows its name, so only the prompt goes under it
+    fn build_action_hints(
+        &self,
+        render_list: &[RenderEntry],
+        floor_item_render_list: &[RenderEntry],
+        hovered_entity_id: Option<u32>,
+        calls: &mut Vec<UiDrawCall>,
+    ) {
+        let (Some(hints), Some(renderer)) = (self.action_hints(), &self.renderer) else {
+            return;
+        };
+        let font = &renderer.font_atlas;
+        let line = font.line_height;
+        const PROMPT: [f32; 4] = [1.0, 0.86, 0.35, 1.0];
+        let (talk, pick, attack) = if hints.pad {
+            ("[Y] Talk", "[Y] Pick up", "[X] Attack")
+        } else {
+            ("Talk", "", "")
+        };
+        let mut prompt = |entry: &RenderEntry, name: Option<(String, [f32; 4])>, text: &str, under_hover: bool| {
+            let x = entry.screen_anchor[0];
+            // below the hovered name plate (and a guild line), else in its place
+            let mut y = entry.pick_bounds[3] + 18.0 + if under_hover { 2.0 * line } else { 0.0 };
+            if let Some((name, color)) = name {
+                let w = self.plate_text_width(&name, font);
+                self.build_plate_text(&name, x - w / 2.0, y, color, font, calls);
+                y += line;
+            }
+            let w = self.plate_text_width(text, font);
+            self.build_plate_text(text, x - w / 2.0, y, PROMPT, font, calls);
+        };
+        let entities = &self.game.world.entities;
+        for (id, text) in [(hints.talk, talk), (hints.monster, attack)] {
+            let Some(id) = id else { continue };
+            let (Some(entity), Some(entry)) = (entities.get(id), render_list.iter().find(|e| e.id == id))
+            else {
+                continue;
+            };
+            let hovered = hovered_entity_id == Some(id);
+            let name = (!hovered && !self.name_hidden(entity))
+                .then(|| plate_name(entity).map(|n| (n.into_owned(), entity_name_color(entity))))
+                .flatten();
+            prompt(entry, name, text, hovered);
+        }
+        if let Some(entry) = hints.item.and_then(|id| floor_item_render_list.iter().find(|e| e.id == id)) {
+            prompt(entry, None, pick, false);
         }
     }
 
