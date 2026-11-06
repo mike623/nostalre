@@ -4,8 +4,22 @@ use crate::lub;
 use crate::lub::{Key, LuaState, LubError, Value};
 use std::rc::Rc;
 
+static TEXT_ENCODING: std::sync::OnceLock<&'static encoding_rs::Encoding> = std::sync::OnceLock::new();
+
+/// Sets the encoding of the client's text tables (kRO: EUC-KR, twRO: Big5). GRF file paths stay EUC-KR.
+pub fn set_text_encoding(label: &str) {
+    if let Some(enc) = encoding_rs::Encoding::for_label(label.as_bytes()) {
+        let _ = TEXT_ENCODING.set(enc);
+    }
+}
+
+pub fn text_encoding() -> &'static encoding_rs::Encoding {
+    TEXT_ENCODING.get().copied().unwrap_or(encoding_rs::EUC_KR)
+}
+
+// ponytail: name kept from the kRO-only days; decodes with the configured text encoding
 pub fn decode_euc_kr(data: &[u8]) -> String {
-    let (decoded, _, _) = encoding_rs::EUC_KR.decode(data);
+    let (decoded, _, _) = text_encoding().decode(data);
     decoded.into_owned()
 }
 

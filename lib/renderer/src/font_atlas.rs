@@ -4,6 +4,7 @@ use std::collections::HashMap;
 const FALLBACK_FONT: &[u8] = include_bytes!("fonts/NotoSans-Regular.ttf");
 const BOLD_FONT: &[u8] = include_bytes!("fonts/NotoSans-Bold.ttf");
 const CJK_FONT: &[u8] = include_bytes!("fonts/NotoSansKR-Regular.otf");
+const TC_FONT: &[u8] = include_bytes!("fonts/NotoSansTC-Regular.otf");
 
 /// ASCII bold glyphs are packed into the same atlas at this Private-Use offset,
 /// so a single texture holds both weights. Map with [`bold_char`].
@@ -80,7 +81,7 @@ pub fn euc_kr_charset() -> Vec<char> {
         for trail in 0x41u8..=0xFE {
             buf[0] = lead;
             buf[1] = trail;
-            let (decoded, _, had_errors) = encoding_rs::EUC_KR.decode(&buf);
+            let (decoded, _, had_errors) = nostalre_formats::lua_table::text_encoding().decode(&buf);
             if had_errors {
                 continue;
             }
@@ -114,7 +115,8 @@ impl FontAtlas {
     }
 
     pub fn from_embedded_cjk(px_height: f32, dpi_scale: f32, extra_chars: &[char]) -> Self {
-        Self::build_with_extra_chars(CJK_FONT, px_height, dpi_scale, extra_chars)
+        let font = if nostalre_formats::lua_table::text_encoding() == encoding_rs::BIG5 { TC_FONT } else { CJK_FONT };
+        Self::build_with_extra_chars(font, px_height, dpi_scale, extra_chars)
     }
 
     pub fn build(font_data: &[u8], px_height: f32, dpi_scale: f32) -> Self {

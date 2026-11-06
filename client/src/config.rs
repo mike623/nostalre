@@ -493,6 +493,8 @@ pub struct Config {
     pub data_dir: Option<String>,
     /// The pinned client's folder (its `System`, `SystemEN`): the tables kRO keeps outside its archive
     pub install_dir: Option<String>,
+    /// Encoding of the GRF's text tables: "euc-kr" (kRO, default) or "big5" (twRO)
+    pub text_encoding: Option<String>,
     pub debug_network_delay_ms: u32,
     pub debug: DebugConfig,
     pub window_state: HashMap<u32, WindowStateEntry>,
@@ -630,8 +632,11 @@ impl Default for Config {
             bgm_path: "BGM".to_string(),
             emblem_path: "emblem".to_string(),
             free_camera: false,
-            // a handheld's screen is a few inches across: its windows and controls at 150%
-            dpi_scale: if cfg!(target_os = "android") {
+            // a handheld's screen is a few inches across: its windows and controls at 150%; an iPhone's
+            // pixels are ~3x denser (scale 3), so 200% leaves it ~1300x600 of UI room, a handheld's
+            dpi_scale: if cfg!(target_os = "ios") {
+                200.0
+            } else if cfg!(target_os = "android") {
                 150.0
             } else {
                 125.0
@@ -639,6 +644,7 @@ impl Default for Config {
             grf_paths: vec![nostalre_resources::grf::DEFAULT_ARCHIVE.to_string()],
             data_dir: None,
             install_dir: None,
+            text_encoding: None,
             debug_network_delay_ms: 0,
             debug: DebugConfig::default(),
             window_state: HashMap::new(),

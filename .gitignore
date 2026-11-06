@@ -22,3 +22,5 @@
 *.aab
 *.log
 /data/
+/ios/build/
+/ios/nostalRE.xcodeproj/

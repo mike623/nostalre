@@ -55,3 +55,14 @@ https://github.com/si-klyde/rathena-nostalre. The app, its grf-server bridge and
 the build scripts are published under GPL-3.0 at
 https://github.com/si-klyde/nostalre-launcher; each release's notes name the
 tags its APK was built from.
+
+This repository is a fork of nostalRE by si-klyde,
+https://github.com/si-klyde/nostalre, Apache License, Version 2.0 (LICENSE.md),
+forked at upstream commit fc02d1b. Fork changes:
+- ios/: iOS port (Xcode project via xcodegen, Objective-C entry point, build
+  and deploy scripts); client/src/main.rs and lib/ui-core gained iOS paths.
+- vendor/lua-src is lua-src 550.0.0 by Aleksandr Orlenko (MIT, vendor/lua-src/LICENSE),
+  modified in lua-5.1.5/loslib.c because iOS has no system(); marked "nostalRE".
+- Configurable text encoding ("text_encoding" in config.json, e.g. "big5" for
+  twRO data) in lib/formats/src/lua_table.rs and lib/renderer/src/font_atlas.rs.
+- lib/renderer/src/fonts/NotoSansTC-Regular.otf added (SIL OFL 1.1).

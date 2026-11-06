@@ -12,7 +12,7 @@ nostalre-resources = { workspace = true }
 winit = { workspace = true }
 
 # no clipboard backend on Android (Ctrl+V paste is a desktop feature)
-[target.'cfg(not(target_os = "android"))'.dependencies]
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 arboard = { version = "3", features = ["wayland-data-control"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]

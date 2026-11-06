@@ -83,4 +83,6 @@ libloading = "0.8"
 # 0.30.12 plus that change in src/platform_impl/android/mod.rs (search "nostalre-client")
 [patch.crates-io]
 winit = { path = "vendor/winit" }
+# iOS: lua-5.1.5 loslib.c calls system(), unavailable there (stubbed)
+lua-src = { path = "vendor/lua-src" }
 

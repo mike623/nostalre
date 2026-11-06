@@ -203,7 +203,7 @@ impl App {
         windows.item_info_window.wrap_title = config.custom.window.wrap_item_info_title;
         windows.hud.layout = config.hud_layout;
         // a handheld's screen, or a desktop checking them (NOSTALRE_TOUCH_CONTROLS=1)
-        windows.hud.touch_controls = cfg!(target_os = "android")
+        windows.hud.touch_controls = cfg!(any(target_os = "android", target_os = "ios"))
             || std::env::var("NOSTALRE_TOUCH_CONTROLS").is_ok_and(|v| v == "1");
         windows.menu.set_key_labels(&config.keybindings);
         game.prefs.self_config.refuse_party_invite = config.refuse_party_invite;
@@ -801,14 +801,18 @@ impl ApplicationHandler for App {
             return;
         }
 
-        let attrs = WindowAttributes::default()
-            .with_title("nostalRE")
-            .with_inner_size(winit::dpi::LogicalSize::new(
-                self.config.screen_width,
-                self.config.screen_height,
-            ));
+        let attrs = WindowAttributes::default().with_title("nostalRE");
+        // iOS: the window is the screen; a requested size becomes the UIWindow's frame (1024x768 points,
+        // larger than a phone), leaving the scene off-centre and the HUD off-screen
+        #[cfg(not(target_os = "ios"))]
+        let attrs = attrs.with_inner_size(winit::dpi::LogicalSize::new(
+            self.config.screen_width,
+            self.config.screen_height,
+        ));
 
         let window = Arc::new(event_loop.create_window(attrs).unwrap());
+        #[cfg(target_os = "ios")]
+        input::soft_keyboard::set_ios_window(&window);
         if self.config.fullscreen {
             window.set_fullscreen(Some(winit::window::Fullscreen::Borderless(None)));
         }
@@ -851,6 +855,12 @@ impl ApplicationHandler for App {
         );
 
         let physical_size = window.inner_size();
+        tracing::info!(
+            "window created {}x{} scale {}",
+            physical_size.width,
+            physical_size.height,
+            window.scale_factor()
+        );
         self.window = Some(window);
         self.renderer = Some(renderer);
         let mut ui_ctx = UiContext::new(
@@ -1286,6 +1296,9 @@ fn pick_account_background(paths: &[String]) -> Option<String> {
 /// config.json from the working directory, then the game until the window closes. Logging is the caller's.
 pub fn run(event_loop: EventLoop<()>) {
     let config = Config::load_or_default("config.json");
+    if let Some(enc) = &config.text_encoding {
+        nostalre_formats::lua_table::set_text_encoding(enc);
+    }
     nostalre_profiling::debug::init(
         config.debug.trace_packet,
         config.debug.trace_effects,
@@ -1318,6 +1331,53 @@ where
 pub fn desktop_main() {
     init_logging(std::io::stdout);
     run(EventLoop::new().unwrap());
+}
+
+/// Entry point for the iOS app: its `main()` (ios/main.m) calls this. Runs from the app's Documents folder,
+/// where the player puts the GRFs and config.json (Finder file sharing); a first run writes a config for the
+/// archives found there. The log goes to client.log next to them.
+#[cfg(target_os = "ios")]
+#[unsafe(no_mangle)]
+pub extern "C" fn nostalre_ios_main() {
+    if let Some(home) = std::env::var_os("HOME") {
+        let docs = std::path::Path::new(&home).join("Documents");
+        let _ = std::fs::create_dir_all(&docs);
+        let _ = std::env::set_current_dir(&docs);
+        if let Ok(log) = std::fs::File::create(docs.join("client.log")) {
+            init_logging(std::sync::Mutex::new(log));
+        }
+        if !docs.join("config.json").exists() {
+            write_ios_first_config(&docs);
+        }
+    }
+    run(EventLoop::new().unwrap());
+}
+
+/// config.json for a first iOS run: the .grf files in Documents (event.grf first, then data.grf, the rest by
+/// name), the folder itself as install_dir, and the Ragnarok Offline server on this Mac (127.0.0.1 reaches
+/// the host from the Simulator; a phone needs the Mac's LAN address, edited in the file).
+#[cfg(target_os = "ios")]
+fn write_ios_first_config(docs: &std::path::Path) {
+    let mut grfs: Vec<String> = std::fs::read_dir(docs)
+        .into_iter()
+        .flatten()
+        .filter_map(|e| e.ok()?.file_name().into_string().ok())
+        .filter(|n| n.to_ascii_lowercase().ends_with(".grf"))
+        .collect();
+    let rank = |n: &String| match n.to_ascii_lowercase().as_str() {
+        "event.grf" => 0,
+        "data.grf" => 1,
+        _ => 2,
+    };
+    grfs.sort_by(|a, b| rank(a).cmp(&rank(b)).then(a.cmp(b)));
+    let config = serde_json::json!({
+        "login_servers": [{ "name": "Ragnarok Offline", "host": "127.0.0.1", "port": 6900 }],
+        "grf_paths": grfs,
+        "install_dir": ".",
+        "bgm_path": "BGM",
+        "text_encoding": "big5",
+    });
+    let _ = std::fs::write(docs.join("config.json"), serde_json::to_string_pretty(&config).unwrap_or_default());
 }
 
 /// Entry point when Android's NativeActivity loads the library (Ragnarok Solo's game screen). The app writes

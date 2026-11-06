@@ -213,10 +213,11 @@ impl UiContext {
         ctrl_v || shift_insert
     }
 
-    #[cfg(target_os = "android")]
+    // ponytail: no clipboard on Android/iOS (arboard has no mobile backend); paste is a desktop feature
+    #[cfg(any(target_os = "android", target_os = "ios"))]
     fn paste_from_clipboard(&mut self) {}
 
-    #[cfg(not(target_os = "android"))]
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     fn paste_from_clipboard(&mut self) {
         if let Ok(mut clipboard) = arboard::Clipboard::new()
             && let Ok(text) = clipboard.get_text()

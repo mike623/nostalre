@@ -1,5 +1,7 @@
 # nostalRE
 
+> **Fork of [si-klyde/nostalre](https://github.com/si-klyde/nostalre)** by si-klyde (Apache-2.0); all credit for the client goes to the original author and the projects listed in [NOTICE](NOTICE). This fork adds an iOS build (`ios/`) and a `text_encoding` config option (e.g. `"big5"` for Traditional Chinese twRO data).
+
 A native Renewal client for desktop and Android. Built with Rust and wgpu,
 with touch, controller, keyboard, and mouse input. Android app builds run the
 client and local servers together for offline play.

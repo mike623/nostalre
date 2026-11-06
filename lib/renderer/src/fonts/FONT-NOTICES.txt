@@ -7,6 +7,10 @@ Noto is a trademark of Google LLC.
 NotoSansKR-Regular.otf:
 © 2014-2021 Adobe (http://www.adobe.com/).
 
+NotoSansTC-Regular.otf (added by this fork, from
+https://github.com/notofonts/noto-cjk, Sans/SubsetOTF/TC):
+© 2014-2021 Adobe (http://www.adobe.com/).
+
 Copyright and trademark statements above are transcribed from the bundled
 font files' name-table metadata. These font files are retained from the
 nostalro-client baseline b4ec4a4, unchanged.

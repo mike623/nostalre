@@ -64,7 +64,23 @@ fn apply(change: Change) {
     }
 }
 
-#[cfg(not(target_os = "android"))]
+/// iOS: the game window, whose first-responder state is the keyboard (winit's `set_ime_allowed`)
+#[cfg(target_os = "ios")]
+static IOS_WINDOW: std::sync::OnceLock<std::sync::Arc<winit::window::Window>> = std::sync::OnceLock::new();
+
+#[cfg(target_os = "ios")]
+pub(crate) fn set_ios_window(window: &std::sync::Arc<winit::window::Window>) {
+    let _ = IOS_WINDOW.set(window.clone());
+}
+
+#[cfg(target_os = "ios")]
+fn apply(change: Change) {
+    if let Some(window) = IOS_WINDOW.get() {
+        window.set_ime_allowed(change == Change::Show);
+    }
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn apply(_: Change) {}
 
 #[cfg(test)]
