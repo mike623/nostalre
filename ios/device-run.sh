@@ -1,14 +1,14 @@
 #!/bin/sh
 # Build, install and launch nostalRE on a connected iPhone (unlocked, Developer Mode on), copy the twRO game
 # files into the app's Documents (about 4 GB, first time only) and point it at Ragnarok Offline on this Mac.
-# usage: ios/device-run.sh [--skip-data]   (env: GAME_DIR, MAC_IP)
+# usage: ios/device-run.sh [--skip-data]   (env: DEVICE=iphone|ipad|<name>, GAME_DIR, MAC_IP)
 set -e
 cd "$(dirname "$0")"
 BUNDLE=io.github.mikewong.nostalre
 GAME_DIR="${GAME_DIR:-$HOME/.ragnarokoffline/twRO-client}"
 MAC_IP="${MAC_IP:-$(ipconfig getifaddr en0 || ipconfig getifaddr en1)}"
-DEV=$(xcrun devicectl list devices 2>/dev/null | grep -i iphone | grep -oE '[0-9A-F-]{36}' | head -1 || true)
-[ -n "$DEV" ] || { echo "no iPhone found (plug in or same Wi-Fi, unlocked)"; exit 1; }
+DEV=$(xcrun devicectl list devices 2>/dev/null | grep -i "${DEVICE:-iphone}" | grep -oE '[0-9A-F-]{36}' | head -1 || true)
+[ -n "$DEV" ] || { echo "no device matching "${DEVICE:-iphone}" found (plug in or same Wi-Fi, unlocked)"; exit 1; }
 xcodegen generate -q
 xcodebuild -project nostalRE.xcodeproj -scheme nostalRE -configuration Release -destination 'generic/platform=iOS' \
   -derivedDataPath build -allowProvisioningUpdates build -quiet

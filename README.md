@@ -16,9 +16,9 @@ client and local servers together for offline play.
 
 **[Download test APK](https://github.com/si-klyde/nostalre-launcher/releases)** · [Install](#play-on-android) · [Contribute](#contributing) · [Credits](#attribution) · [License](#license) · [AI disclosure](#ai-use-disclosure)
 
-![nostalRE gameplay on an Android handheld](docs/images/android-handheld.webp)
+![nostalRE on iOS (iPhone 17e Simulator) with Traditional Chinese twRO data](docs/images/ios-iphone.webp)
 
-*A mobile-first client. User-provided photo; game resources are supplied separately.*
+*This fork on iOS (iPhone 17e Simulator) with `"text_encoding": "big5"`. Game resources are supplied separately.*
 
 ## Play on Android
 
