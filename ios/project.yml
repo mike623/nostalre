@@ -29,7 +29,7 @@ targets:
         # the static library by path: -l would pick cargo's libnostalre_client.dylib beside it
         "RUST_DIR[sdk=iphonesimulator*]": "$(SRCROOT)/../target/aarch64-apple-ios-sim/release"
         "RUST_DIR[sdk=iphoneos*]": "$(SRCROOT)/../target/aarch64-apple-ios/release"
-        OTHER_LDFLAGS: "$(RUST_DIR)/libnostalre_client.a $(RUST_DIR)/liblua5.1.a -liconv -lobjc -lc++ -framework Metal -framework QuartzCore -framework UIKit -framework Foundation -framework CoreGraphics -framework CoreFoundation -framework AudioToolbox -framework AVFoundation -framework CoreAudio -framework Security -framework SystemConfiguration -framework GameController -framework CoreHaptics"
+        OTHER_LDFLAGS: "$(RUST_DIR)/libnostalre_client.a $(RUST_DIR)/liblua5.1.a -liconv -lobjc -lc++ -framework Metal -framework QuartzCore -framework UIKit -framework Foundation -framework CoreGraphics -framework CoreFoundation -framework AudioToolbox -framework AVFoundation -framework CoreAudio -framework Security -framework SystemConfiguration -framework GameController -framework CoreHaptics -framework WebKit"
         INFOPLIST_FILE: Info.plist
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         MARKETING_VERSION: 0.1.0
